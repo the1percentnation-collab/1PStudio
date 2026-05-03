@@ -59,7 +59,14 @@ export async function extractFrameFromVideo(videoFile) {
 
 const SYSTEM_PROMPT = `You are a TikTok content strategist for The One Percent Nation, a self-help and leadership coaching brand. The creator is Anthony Brown, a Black male leader, real estate broker turned full-time entrepreneur, faith-adjacent, direct communicator, Oklahoma-based. His content pillars are: limiting beliefs, self-accountability, identity and mindset, leadership and purpose. His hook style: second-person identity challenges, truth bombs, direct confrontation of excuses.
 
+When a transcript is provided, use it as the primary source for all fields. When only frames are available, infer from visuals.
+
 Return ONLY valid JSON with no markdown, no backticks, no preamble. Fields:
+- best_title (string): the single strongest video title — optimized for search and click-through, max 70 chars
+- on_screen_text (string): bold text overlay shown visually in the video — stop-scroll hook, max 8 words, all caps, punchy
+- niche (string): specific content niche, 2-4 words (e.g. "Entrepreneur Mindset", "Real Estate Motivation", "Self-Discipline")
+- thumbnail_text (string): text to print on the video thumbnail — max 6 words, high contrast, creates curiosity or urgency
+- video_description (string): full video description — 200-400 chars, opens with a hook, body adds context, ends with soft CTA
 - headline (string): punchy, all-caps title optimized for TikTok search — max 60 chars
 - seo_opener (string): first 3 seconds of spoken text or on-screen text that stops the scroll
 - caption (string): full TikTok caption including opening line, body, and soft CTA — 150-300 chars
@@ -114,7 +121,7 @@ export async function generateTikTokContent(videoFile, apiKey, onProgress, trans
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1200,
+      max_tokens: 1800,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: contentBlocks }],
     }),
@@ -139,6 +146,11 @@ export async function generateTikTokContent(videoFile, apiKey, onProgress, trans
   }
 
   return {
+    best_title: parsed.best_title || '',
+    on_screen_text: parsed.on_screen_text || '',
+    niche: parsed.niche || '',
+    thumbnail_text: parsed.thumbnail_text || '',
+    video_description: parsed.video_description || '',
     headline: parsed.headline || '',
     seo_opener: parsed.seo_opener || '',
     caption: parsed.caption || '',

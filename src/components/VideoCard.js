@@ -260,16 +260,18 @@ export default function VideoCard({ result, onRegenerate, onRemove }) {
 
   const buildAllText = () => {
     if (!content) return '';
-    const titleLines = content.titles?.length
-      ? `TITLE OPTIONS:\n${content.titles.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n\n`
-      : '';
-    return [
-      titleLines,
-      `HEADLINE: ${content.headline}`,
-      `SEO OPENER: ${content.seo_opener}`,
-      `CAPTION: ${content.caption}`,
-      `HASHTAGS: ${content.hashtags}`,
-    ].join('\n\n');
+    const parts = [];
+    if (content.best_title)       parts.push(`BEST TITLE: ${content.best_title}`);
+    if (content.on_screen_text)   parts.push(`ON-SCREEN TEXT: ${content.on_screen_text}`);
+    if (content.niche)            parts.push(`NICHE: ${content.niche}`);
+    if (content.thumbnail_text)   parts.push(`THUMBNAIL TEXT: ${content.thumbnail_text}`);
+    if (content.video_description) parts.push(`VIDEO DESCRIPTION:\n${content.video_description}`);
+    if (content.headline)         parts.push(`HEADLINE: ${content.headline}`);
+    if (content.seo_opener)       parts.push(`SEO OPENER: ${content.seo_opener}`);
+    if (content.caption)          parts.push(`CAPTION: ${content.caption}`);
+    if (content.hashtags)         parts.push(`HASHTAGS: ${content.hashtags}`);
+    if (content.titles?.length)   parts.push(`TITLE OPTIONS:\n${content.titles.map((t, i) => `${i + 1}. ${t}`).join('\n')}`);
+    return parts.join('\n\n');
   };
 
   return (
@@ -320,6 +322,41 @@ export default function VideoCard({ result, onRegenerate, onRemove }) {
       {/* CONTENT FIELDS */}
       {content && (
         <div style={{ padding: '4px 16px 12px' }}>
+          {/* PRIMARY FIELDS — transcript-driven */}
+          {content.best_title && (
+            <ContentField label="BEST VIDEO TITLE" value={content.best_title} mono />
+          )}
+          {content.on_screen_text && (
+            <ContentField label="ON-SCREEN TEXT" value={content.on_screen_text} mono />
+          )}
+          {(content.niche || content.thumbnail_text) && (
+            <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
+              {content.niche && (
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', color: '#666', textTransform: 'uppercase' }}>NICHE</span>
+                    <CopyButton text={content.niche} small />
+                  </div>
+                  <div style={{ fontSize: 13, color: '#FFFFFF', lineHeight: 1.55 }}>{content.niche}</div>
+                </div>
+              )}
+              {content.thumbnail_text && (
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', color: '#666', textTransform: 'uppercase' }}>THUMBNAIL TEXT</span>
+                    <CopyButton text={content.thumbnail_text} small />
+                  </div>
+                  <div style={{ fontSize: 13, color: '#FFFFFF', fontWeight: 700, lineHeight: 1.55 }}>{content.thumbnail_text}</div>
+                </div>
+              )}
+            </div>
+          )}
+          {content.video_description && (
+            <ContentField label="VIDEO DESCRIPTION" value={content.video_description} />
+          )}
+
+          <div style={{ borderTop: '1px solid #1A1A1A', margin: '14px 0' }} />
+
           <TitleOptions titles={content.titles} />
           <ContentField label="HEADLINE" value={content.headline} mono />
           <ContentField label="3-SEC SEO OPENER" value={content.seo_opener} />

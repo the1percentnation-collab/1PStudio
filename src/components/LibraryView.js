@@ -153,6 +153,35 @@ function LibraryCard({ item, onDelete }) {
         <div style={{ borderTop: '1px solid #1A1A1A', padding: '14px 16px 16px' }}>
           {content ? (
             <>
+              {/* PRIMARY FIELDS */}
+              {content.best_title && <Field label="BEST VIDEO TITLE" value={content.best_title} />}
+              {content.on_screen_text && <Field label="ON-SCREEN TEXT" value={content.on_screen_text} />}
+              {(content.niche || content.thumbnail_text) && (
+                <div style={{ display: 'flex', gap: 12, marginBottom: 10 }}>
+                  {content.niche && (
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                        <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', color: '#555', textTransform: 'uppercase' }}>NICHE</span>
+                        <CopyBtn text={content.niche} />
+                      </div>
+                      <div style={{ fontSize: 12, color: '#CCC', lineHeight: 1.5 }}>{content.niche}</div>
+                    </div>
+                  )}
+                  {content.thumbnail_text && (
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
+                        <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', color: '#555', textTransform: 'uppercase' }}>THUMBNAIL TEXT</span>
+                        <CopyBtn text={content.thumbnail_text} />
+                      </div>
+                      <div style={{ fontSize: 12, color: '#CCC', fontWeight: 700, lineHeight: 1.5 }}>{content.thumbnail_text}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {content.video_description && <Field label="VIDEO DESCRIPTION" value={content.video_description} />}
+
+              <div style={{ borderTop: '1px solid #1A1A1A', margin: '12px 0' }} />
+
               {content.titles?.length > 0 && (
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', color: '#555', textTransform: 'uppercase', marginBottom: 8 }}>
