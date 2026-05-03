@@ -33,6 +33,12 @@ jobs:
       - name: Write service account
         run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > /tmp/gsa.json
 
+      - name: Set Anthropic API key secret
+        run: |
+          echo "${{ secrets.ANTHROPIC_API_KEY }}" | npx firebase-tools functions:secrets:set ANTHROPIC_API_KEY --data-stdin --project onepstudio-9a3ef
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gsa.json
+
       - name: Deploy hosting + functions
         run: npx firebase-tools deploy --only hosting,functions --project onepstudio-9a3ef
         env:
