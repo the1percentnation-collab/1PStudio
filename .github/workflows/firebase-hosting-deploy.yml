@@ -1,4 +1,4 @@
-name: Deploy to Firebase Hosting (on merge)
+name: Deploy to Firebase
 
 on:
   push:
@@ -18,16 +18,22 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install dependencies
+      - name: Install root dependencies
         run: npm ci
 
       - name: Build React app
         run: npm run build
 
-      - name: Deploy to Firebase Hosting
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          projectId: onepstudio-9a3ef
-          channelId: live
+      - name: Install functions dependencies
+        run: npm ci --prefix functions
+
+      - name: Build functions
+        run: npm run build --prefix functions
+
+      - name: Write service account
+        run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > /tmp/gsa.json
+
+      - name: Deploy hosting + functions
+        run: npx firebase-tools deploy --only hosting,functions --project onepstudio-9a3ef
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gsa.json

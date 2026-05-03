@@ -3,7 +3,7 @@ import DropZone from './components/DropZone';
 import VideoCard from './components/VideoCard';
 import QueueProgress from './components/QueueProgress';
 import LibraryView from './components/LibraryView';
-import { generateTikTokContent, extractFramesFromVideo } from './services/claudeService';
+import { generateTikTokContent } from './services/claudeService';
 
 const LIBRARY_KEY = '1p-studio-library';
 
@@ -28,9 +28,6 @@ function saveLibrary(items) {
 }
 
 export default function App() {
-  const [apiKey, setApiKey] = useState('');
-  const [keyInput, setKeyInput] = useState('');
-  const [keySet, setKeySet] = useState(false);
   const [queue, setQueue] = useState([]);
   const [results, setResults] = useState([]);
   const [processing, setProcessing] = useState(false);
@@ -63,29 +60,22 @@ export default function App() {
   }, []);
 
   const processFile = useCallback(
-    async (queueItem, key, transcript = '') => {
+    async (queueItem, transcript = '') => {
       const { id, file } = queueItem;
       updateQueueItem(id, { status: 'processing', message: 'Starting...' });
 
-      let frames = { hookFrame: null, midFrame: null, endFrame: null };
       try {
-        frames = await extractFramesFromVideo(file);
-      } catch {
-        /* non-fatal */
-      }
-
-      try {
-        const content = await generateTikTokContent(file, key, (msg) => {
+        const content = await generateTikTokContent(file, (msg) => {
           updateQueueItem(id, { message: msg });
         }, transcript);
 
         updateQueueItem(id, { status: 'done', message: '' });
-        const entry = { id, filename: file.name, _file: file, frames, content, error: null };
+        const entry = { id, filename: file.name, _file: file, frames: {}, content, error: null };
         setResults((prev) => [entry, ...prev]);
         addToLibrary(entry);
       } catch (err) {
         updateQueueItem(id, { status: 'error', message: 'Failed' });
-        const entry = { id, filename: file.name, _file: file, frames, content: null, error: err.message };
+        const entry = { id, filename: file.name, _file: file, frames: {}, content: null, error: err.message };
         setResults((prev) => [entry, ...prev]);
         addToLibrary(entry);
       }
@@ -95,11 +85,6 @@ export default function App() {
 
   const handleFilesSelected = useCallback(
     async (files) => {
-      if (!apiKey) {
-        alert('Please set your Anthropic API key first.');
-        return;
-      }
-
       const items = files.map((file) => ({
         id: uid(),
         file,
@@ -112,12 +97,12 @@ export default function App() {
       setProcessing(true);
 
       for (const item of items) {
-        await processFile(item, apiKey);
+        await processFile(item);
       }
 
       setProcessing(false);
     },
-    [apiKey, processFile]
+    [processFile]
   );
 
   const handleRegenerate = useCallback(
@@ -138,23 +123,15 @@ export default function App() {
 
       setQueue((prev) => [...prev, queueItem]);
       setProcessing(true);
-      await processFile(queueItem, apiKey, transcript || '');
+      await processFile(queueItem, transcript || '');
       setProcessing(false);
     },
-    [results, apiKey, processFile]
+    [results, processFile]
   );
 
   const handleRemove = useCallback((id) => {
     setResults((prev) => prev.filter((r) => r.id !== id));
   }, []);
-
-  const handleSetKey = () => {
-    const trimmed = keyInput.trim();
-    if (!trimmed) return;
-    setApiKey(trimmed);
-    setKeySet(true);
-    setKeyInput('');
-  };
 
   const isQueueActive = queue.some((i) => i.status === 'waiting' || i.status === 'processing');
 
@@ -207,66 +184,6 @@ export default function App() {
             <button style={tabStyle('library')} onClick={() => setActiveTab('library')}>
               LIBRARY{library.length > 0 ? ` (${library.length})` : ''}
             </button>
-          </div>
-
-          {/* KEY INPUT */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, justifyContent: 'flex-end' }}>
-            {keySet ? (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  fontSize: 12,
-                  color: '#00C48C',
-                  background: '#00C48C14',
-                  border: '1px solid #00C48C44',
-                  borderRadius: 6,
-                  padding: '4px 10px',
-                  cursor: 'pointer',
-                }}
-                onClick={() => { setKeySet(false); setApiKey(''); }}
-                title="Click to reset key"
-              >
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#00C48C', display: 'inline-block' }} />
-                Key Set
-              </div>
-            ) : (
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input
-                  type="password"
-                  placeholder="Anthropic API Key"
-                  value={keyInput}
-                  onChange={(e) => setKeyInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSetKey()}
-                  style={{
-                    background: '#111',
-                    border: '1px solid #1A1A1A',
-                    borderRadius: 8,
-                    color: '#FFF',
-                    fontSize: 13,
-                    padding: '7px 12px',
-                    width: 200,
-                  }}
-                />
-                <button
-                  onClick={handleSetKey}
-                  style={{
-                    background: '#E60306',
-                    color: '#FFF',
-                    fontSize: 13,
-                    fontWeight: 600,
-                    padding: '7px 14px',
-                    borderRadius: 8,
-                    transition: 'opacity 0.2s',
-                  }}
-                  onMouseEnter={(e) => (e.target.style.opacity = '0.85')}
-                  onMouseLeave={(e) => (e.target.style.opacity = '1')}
-                >
-                  Save
-                </button>
-              </div>
-            )}
           </div>
         </div>
       </header>

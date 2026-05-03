@@ -1,4 +1,7 @@
 {
+  "functions": {
+    "source": "functions"
+  },
   "hosting": {
     "public": "build",
     "ignore": [
@@ -7,6 +10,11 @@
       "**/node_modules/**"
     ],
     "rewrites": [
+      {
+        "source": "/api/analyze",
+        "function": "analyzeVideo",
+        "region": "us-central1"
+      },
       {
         "source": "**",
         "destination": "/index.html"
