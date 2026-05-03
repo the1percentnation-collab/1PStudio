@@ -2,7 +2,7 @@ import React, { useState, useCallback } from 'react';
 import DropZone from './components/DropZone';
 import VideoCard from './components/VideoCard';
 import QueueProgress from './components/QueueProgress';
-import { generateTikTokContent, extractFrameFromVideo } from './services/claudeService';
+import { generateTikTokContent, extractFramesFromVideo } from './services/claudeService';
 
 let idCounter = 0;
 const uid = () => `v-${++idCounter}-${Date.now()}`;
@@ -20,13 +20,13 @@ export default function App() {
   }, []);
 
   const processFile = useCallback(
-    async (queueItem, key) => {
+    async (queueItem, key, transcript = '') => {
       const { id, file } = queueItem;
       updateQueueItem(id, { status: 'processing', message: 'Starting...' });
 
-      let thumbnail = null;
+      let frames = { hookFrame: null, midFrame: null, endFrame: null };
       try {
-        thumbnail = await extractFrameFromVideo(file);
+        frames = await extractFramesFromVideo(file);
       } catch {
         /* non-fatal */
       }
@@ -34,17 +34,17 @@ export default function App() {
       try {
         const content = await generateTikTokContent(file, key, (msg) => {
           updateQueueItem(id, { message: msg });
-        });
+        }, transcript);
 
         updateQueueItem(id, { status: 'done', message: '' });
         setResults((prev) => [
-          { id, filename: file.name, thumbnail, content, error: null },
+          { id, filename: file.name, _file: file, frames, content, error: null },
           ...prev,
         ]);
       } catch (err) {
         updateQueueItem(id, { status: 'error', message: 'Failed' });
         setResults((prev) => [
-          { id, filename: file.name, thumbnail, content: null, error: err.message },
+          { id, filename: file.name, _file: file, frames, content: null, error: err.message },
           ...prev,
         ]);
       }
@@ -80,16 +80,16 @@ export default function App() {
   );
 
   const handleRegenerate = useCallback(
-    async (id) => {
+    async (id, transcript) => {
       const result = results.find((r) => r.id === id);
-      if (!result) return;
+      if (!result || !result._file) return;
 
       setResults((prev) => prev.filter((r) => r.id !== id));
 
       const newId = uid();
       const queueItem = {
         id: newId,
-        file: result._file || { name: result.filename },
+        file: result._file,
         filename: result.filename,
         status: 'waiting',
         message: '',
@@ -97,7 +97,7 @@ export default function App() {
 
       setQueue((prev) => [...prev, queueItem]);
       setProcessing(true);
-      await processFile(queueItem, apiKey);
+      await processFile(queueItem, apiKey, transcript || '');
       setProcessing(false);
     },
     [results, apiKey, processFile]
@@ -116,10 +116,14 @@ export default function App() {
       'Content Pillar',
       'Hook Score',
       'Headline',
+      'Title Option 1',
+      'Title Option 2',
+      'Title Option 3',
       'SEO Opener',
       'Caption',
       'Hashtags',
       'Hook Score Reason',
+      'Transcript Summary',
     ];
 
     const escape = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
@@ -132,10 +136,14 @@ export default function App() {
           escape(r.content.content_pillar),
           escape(r.content.hook_score),
           escape(r.content.headline),
+          escape(r.content.titles?.[0]),
+          escape(r.content.titles?.[1]),
+          escape(r.content.titles?.[2]),
           escape(r.content.seo_opener),
           escape(r.content.caption),
           escape(r.content.hashtags),
           escape(r.content.hook_score_reason),
+          escape(r.content.transcript_summary),
         ].join(',')
       ),
     ].join('\n');
@@ -186,7 +194,6 @@ export default function App() {
             gap: 16,
           }}
         >
-          {/* LOGO */}
           <div
             style={{
               fontFamily: "'Bebas Neue', sans-serif",
@@ -199,7 +206,6 @@ export default function App() {
             <span style={{ color: '#FFFFFF', marginLeft: 6 }}>STUDIO</span>
           </div>
 
-          {/* API KEY + CONTROLS */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, justifyContent: 'flex-end' }}>
             {keySet ? (
               <div
@@ -283,13 +289,7 @@ export default function App() {
       </header>
 
       {/* MAIN CONTENT */}
-      <main
-        style={{
-          maxWidth: 760,
-          margin: '0 auto',
-          padding: '32px 24px 64px',
-        }}
-      >
+      <main style={{ maxWidth: 760, margin: '0 auto', padding: '32px 24px 64px' }}>
         <DropZone onFilesSelected={handleFilesSelected} processing={processing} />
 
         {isQueueActive && (

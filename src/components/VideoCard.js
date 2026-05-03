@@ -23,7 +23,7 @@ function CopyButton({ text, small }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      /* fallback: ignore */
+      /* ignore */
     }
   };
 
@@ -39,6 +39,7 @@ function CopyButton({ text, small }) {
         borderRadius: 6,
         transition: 'all 0.2s',
         flexShrink: 0,
+        cursor: 'pointer',
       }}
     >
       {copied ? 'Copied!' : 'Copy'}
@@ -49,23 +50,8 @@ function CopyButton({ text, small }) {
 function ContentField({ label, value, mono }) {
   return (
     <div style={{ marginBottom: 14 }}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 6,
-        }}
-      >
-        <span
-          style={{
-            fontSize: 10,
-            fontWeight: 600,
-            letterSpacing: '0.12em',
-            color: '#666',
-            textTransform: 'uppercase',
-          }}
-        >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', color: '#666', textTransform: 'uppercase' }}>
           {label}
         </span>
         <CopyButton text={value} small />
@@ -87,85 +73,198 @@ function ContentField({ label, value, mono }) {
   );
 }
 
+function FrameStrip({ frames }) {
+  const available = [
+    { label: 'HOOK', data: frames?.hookFrame },
+    { label: 'MID', data: frames?.midFrame },
+    { label: 'END', data: frames?.endFrame },
+  ].filter((f) => f.data);
+
+  if (available.length === 0) return null;
+
+  return (
+    <div style={{ display: 'flex', gap: 6, padding: '0 16px 14px' }}>
+      {available.map(({ label, data }) => (
+        <div key={label} style={{ flex: 1, position: 'relative' }}>
+          <img
+            src={`data:image/jpeg;base64,${data}`}
+            alt={`${label} frame`}
+            style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', borderRadius: 8, display: 'block' }}
+          />
+          <span
+            style={{
+              position: 'absolute',
+              top: 6,
+              left: 6,
+              background: 'rgba(0,0,0,0.7)',
+              color: label === 'HOOK' ? '#E60306' : '#888',
+              fontSize: 9,
+              fontWeight: 700,
+              letterSpacing: '0.1em',
+              padding: '2px 6px',
+              borderRadius: 4,
+            }}
+          >
+            {label}
+          </span>
+          <a
+            href={`data:image/jpeg;base64,${data}`}
+            download={`frame-${label.toLowerCase()}.jpg`}
+            style={{
+              position: 'absolute',
+              bottom: 6,
+              right: 6,
+              background: 'rgba(0,0,0,0.7)',
+              color: '#CCC',
+              fontSize: 10,
+              padding: '2px 8px',
+              borderRadius: 4,
+              textDecoration: 'none',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            ↓
+          </a>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TitleOptions({ titles }) {
+  if (!titles || titles.length === 0) return null;
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', color: '#666', textTransform: 'uppercase', marginBottom: 8 }}>
+        TITLE OPTIONS
+      </div>
+      {titles.map((t, i) => (
+        <div
+          key={i}
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            gap: 8,
+            background: '#0A0A0A',
+            border: '1px solid #1A1A1A',
+            borderRadius: 8,
+            padding: '8px 10px',
+            marginBottom: 6,
+          }}
+        >
+          <span style={{ fontSize: 12, color: '#DDD', lineHeight: 1.45, flex: 1 }}>{t}</span>
+          <CopyButton text={t} small />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TranscriptPanel({ onRegenerate, isRegenerating }) {
+  const [open, setOpen] = useState(false);
+  const [transcript, setTranscript] = useState('');
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        style={{
+          background: 'transparent',
+          border: '1px dashed #333',
+          color: '#666',
+          fontSize: 12,
+          padding: '7px 14px',
+          borderRadius: 8,
+          cursor: 'pointer',
+          transition: 'color 0.2s, border-color 0.2s',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = '#AAA'; e.currentTarget.style.borderColor = '#555'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = '#666'; e.currentTarget.style.borderColor = '#333'; }}
+      >
+        + Add Transcript
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ width: '100%', marginTop: 4 }}>
+      <textarea
+        placeholder="Paste your video transcript here for more accurate titles, hooks, and captions…"
+        value={transcript}
+        onChange={(e) => setTranscript(e.target.value)}
+        rows={4}
+        style={{
+          width: '100%',
+          background: '#0A0A0A',
+          border: '1px solid #2A2A2A',
+          borderRadius: 8,
+          color: '#CCC',
+          fontSize: 12,
+          lineHeight: 1.5,
+          padding: '10px 12px',
+          resize: 'vertical',
+          boxSizing: 'border-box',
+          fontFamily: 'inherit',
+          marginBottom: 8,
+        }}
+      />
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button
+          onClick={() => onRegenerate(transcript)}
+          disabled={isRegenerating || !transcript.trim()}
+          style={{
+            background: '#E60306',
+            color: '#FFF',
+            fontSize: 13,
+            fontWeight: 600,
+            padding: '7px 16px',
+            borderRadius: 8,
+            cursor: isRegenerating || !transcript.trim() ? 'not-allowed' : 'pointer',
+            opacity: isRegenerating || !transcript.trim() ? 0.5 : 1,
+            transition: 'opacity 0.2s',
+          }}
+        >
+          {isRegenerating ? 'Regenerating…' : 'Regenerate with Transcript'}
+        </button>
+        <button
+          onClick={() => { setOpen(false); setTranscript(''); }}
+          style={{
+            background: 'transparent',
+            border: '1px solid #333',
+            color: '#666',
+            fontSize: 13,
+            padding: '7px 12px',
+            borderRadius: 8,
+            cursor: 'pointer',
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function VideoCard({ result, onRegenerate, onRemove }) {
-  const { id, filename, thumbnail, content, error } = result;
+  const { id, filename, frames, content, error } = result;
+  const [isRegenerating, setIsRegenerating] = useState(false);
   const pillarColor = content ? (PILLAR_COLORS[content.content_pillar] || '#888') : '#888';
 
-  const cardStyle = {
-    background: '#111111',
-    border: '1px solid #1A1A1A',
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginBottom: 16,
-  };
-
-  const headerStyle = {
-    padding: '14px 16px 0',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: 12,
-  };
-
-  const filenameStyle = {
-    fontSize: 12,
-    color: '#888',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    maxWidth: '70%',
-  };
-
-  const scoreStyle = {
-    fontFamily: "'Bebas Neue', sans-serif",
-    fontSize: 32,
-    lineHeight: 1,
-    color: content ? hookScoreColor(content.hook_score) : '#444',
-    flexShrink: 0,
-  };
-
-  const thumbnailWrapStyle = {
-    position: 'relative',
-    width: '100%',
-    aspectRatio: '16/9',
-    background: '#0A0A0A',
-    overflow: 'hidden',
-    marginTop: 12,
-  };
-
-  const overlayStyle = {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    background: 'linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%)',
-    padding: '32px 14px 12px',
-  };
-
-  const bodyStyle = {
-    padding: '16px 16px 12px',
-  };
-
-  const tipStyle = {
-    background: '#0A0A0A',
-    border: '1px solid #1A1A1A',
-    borderRadius: 8,
-    padding: '10px 12px',
-    fontSize: 12,
-    color: '#888',
-    lineHeight: 1.5,
-    marginBottom: 14,
-  };
-
-  const actionsStyle = {
-    display: 'flex',
-    gap: 8,
-    padding: '0 16px 16px',
+  const handleRegenerate = async (transcript) => {
+    setIsRegenerating(true);
+    await onRegenerate(id, transcript);
+    setIsRegenerating(false);
   };
 
   const buildAllText = () => {
     if (!content) return '';
+    const titleLines = content.titles?.length
+      ? `TITLE OPTIONS:\n${content.titles.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n\n`
+      : '';
     return [
+      titleLines,
       `HEADLINE: ${content.headline}`,
       `SEO OPENER: ${content.seo_opener}`,
       `CAPTION: ${content.caption}`,
@@ -174,92 +273,70 @@ export default function VideoCard({ result, onRegenerate, onRemove }) {
   };
 
   return (
-    <div style={cardStyle}>
-      <div style={headerStyle}>
-        <div>
-          <div style={filenameStyle}>{filename}</div>
+    <div style={{ background: '#111111', border: '1px solid #1A1A1A', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
+      {/* CARD HEADER */}
+      <div style={{ padding: '14px 16px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 12, color: '#888', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {filename}
+          </div>
           {content && (
-            <div
-              style={{
-                marginTop: 6,
-                display: 'inline-block',
-                background: `${pillarColor}22`,
-                border: `1px solid ${pillarColor}55`,
-                color: pillarColor,
-                fontSize: 10,
-                fontWeight: 600,
-                letterSpacing: '0.08em',
-                padding: '3px 8px',
-                borderRadius: 4,
-                textTransform: 'uppercase',
-              }}
-            >
+            <div style={{
+              marginTop: 6,
+              display: 'inline-block',
+              background: `${pillarColor}22`,
+              border: `1px solid ${pillarColor}55`,
+              color: pillarColor,
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: '0.08em',
+              padding: '3px 8px',
+              borderRadius: 4,
+              textTransform: 'uppercase',
+            }}>
               {content.content_pillar}
             </div>
           )}
+          {content?.transcript_summary && (
+            <div style={{ marginTop: 8, fontSize: 12, color: '#777', lineHeight: 1.45 }}>
+              {content.transcript_summary}
+            </div>
+          )}
         </div>
-        <div style={scoreStyle}>
+        <div style={{
+          fontFamily: "'Bebas Neue', sans-serif",
+          fontSize: 32,
+          lineHeight: 1,
+          color: content ? hookScoreColor(content.hook_score) : '#444',
+          flexShrink: 0,
+        }}>
           {content ? `${content.hook_score}/10` : error ? 'ERR' : '...'}
         </div>
       </div>
 
-      <div style={thumbnailWrapStyle}>
-        {thumbnail ? (
-          <img
-            src={`data:image/jpeg;base64,${thumbnail}`}
-            alt="Video frame"
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-          />
-        ) : (
-          <div
-            style={{
-              width: '100%',
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#333',
-              fontSize: 32,
-            }}
-          >
-            🎬
-          </div>
-        )}
-        {content && (
-          <div style={overlayStyle}>
-            <div
-              style={{
-                fontFamily: "'Bebas Neue', sans-serif",
-                fontSize: 18,
-                letterSpacing: '0.03em',
-                color: '#FFFFFF',
-                marginBottom: 4,
-                lineHeight: 1.1,
-              }}
-            >
-              {content.headline}
-            </div>
-            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', lineHeight: 1.4 }}>
-              {content.seo_opener}
-            </div>
-          </div>
-        )}
-        {error && (
-          <div style={overlayStyle}>
-            <div style={{ fontSize: 12, color: '#FF4444' }}>Error: {error}</div>
-          </div>
-        )}
-      </div>
+      {/* FRAME STRIP — hook screenshot + mid + end, all downloadable */}
+      <FrameStrip frames={frames} />
 
+      {/* CONTENT FIELDS */}
       {content && (
-        <div style={bodyStyle}>
+        <div style={{ padding: '4px 16px 12px' }}>
+          <TitleOptions titles={content.titles} />
           <ContentField label="HEADLINE" value={content.headline} mono />
           <ContentField label="3-SEC SEO OPENER" value={content.seo_opener} />
           <ContentField label="CAPTION" value={content.caption} />
           <ContentField label="HASHTAGS" value={content.hashtags} />
 
           {content.hook_score_reason && (
-            <div style={tipStyle}>
+            <div style={{
+              background: '#0A0A0A',
+              border: '1px solid #1A1A1A',
+              borderRadius: 8,
+              padding: '10px 12px',
+              fontSize: 12,
+              color: '#888',
+              lineHeight: 1.5,
+              marginBottom: 14,
+            }}>
               <span style={{ color: '#E60306', fontWeight: 600 }}>Tip: </span>
               {content.hook_score_reason}
             </div>
@@ -267,7 +344,14 @@ export default function VideoCard({ result, onRegenerate, onRemove }) {
         </div>
       )}
 
-      <div style={actionsStyle}>
+      {error && (
+        <div style={{ padding: '0 16px 14px', fontSize: 12, color: '#FF4444' }}>
+          Error: {error}
+        </div>
+      )}
+
+      {/* ACTIONS */}
+      <div style={{ display: 'flex', gap: 8, padding: '0 16px 16px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {content && (
           <button
             onClick={() => navigator.clipboard.writeText(buildAllText()).catch(() => {})}
@@ -278,16 +362,19 @@ export default function VideoCard({ result, onRegenerate, onRemove }) {
               fontWeight: 600,
               padding: '8px 16px',
               borderRadius: 8,
+              cursor: 'pointer',
               transition: 'opacity 0.2s',
             }}
-            onMouseEnter={(e) => (e.target.style.opacity = '0.85')}
-            onMouseLeave={(e) => (e.target.style.opacity = '1')}
+            onMouseEnter={(e) => (e.currentTarget.style.opacity = '0.85')}
+            onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}
           >
             Copy All
           </button>
         )}
+
         <button
-          onClick={() => onRegenerate(id)}
+          onClick={() => handleRegenerate('')}
+          disabled={isRegenerating}
           style={{
             background: '#1A1A1A',
             color: '#CCC',
@@ -296,13 +383,18 @@ export default function VideoCard({ result, onRegenerate, onRemove }) {
             padding: '8px 16px',
             borderRadius: 8,
             border: '1px solid #333',
+            cursor: isRegenerating ? 'not-allowed' : 'pointer',
+            opacity: isRegenerating ? 0.5 : 1,
             transition: 'border-color 0.2s',
           }}
-          onMouseEnter={(e) => (e.target.style.borderColor = '#E60306')}
-          onMouseLeave={(e) => (e.target.style.borderColor = '#333')}
+          onMouseEnter={(e) => !isRegenerating && (e.currentTarget.style.borderColor = '#E60306')}
+          onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#333')}
         >
           Regenerate
         </button>
+
+        <TranscriptPanel onRegenerate={handleRegenerate} isRegenerating={isRegenerating} />
+
         <button
           onClick={() => onRemove(id)}
           style={{
@@ -313,16 +405,12 @@ export default function VideoCard({ result, onRegenerate, onRemove }) {
             padding: '8px 16px',
             borderRadius: 8,
             border: '1px solid transparent',
+            cursor: 'pointer',
             transition: 'color 0.2s, border-color 0.2s',
+            marginLeft: 'auto',
           }}
-          onMouseEnter={(e) => {
-            e.target.style.color = '#FF4444';
-            e.target.style.borderColor = '#FF4444';
-          }}
-          onMouseLeave={(e) => {
-            e.target.style.color = '#666';
-            e.target.style.borderColor = 'transparent';
-          }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = '#FF4444'; e.currentTarget.style.borderColor = '#FF4444'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = '#666'; e.currentTarget.style.borderColor = 'transparent'; }}
         >
           Remove
         </button>
