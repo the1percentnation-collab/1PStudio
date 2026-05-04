@@ -8,9 +8,9 @@ let idCounter = 0;
 const uid = () => `v-${++idCounter}-${Date.now()}`;
 
 export default function App() {
-  const [apiKey, setApiKey] = useState('');
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('1ps_api_key') || '');
   const [keyInput, setKeyInput] = useState('');
-  const [keySet, setKeySet] = useState(false);
+  const [keySet, setKeySet] = useState(() => Boolean(localStorage.getItem('1ps_api_key')));
   const [queue, setQueue] = useState([]);
   const [results, setResults] = useState([]);
   const [processing, setProcessing] = useState(false);
@@ -153,6 +153,7 @@ export default function App() {
   const handleSetKey = () => {
     const trimmed = keyInput.trim();
     if (!trimmed) return;
+    localStorage.setItem('1ps_api_key', trimmed);
     setApiKey(trimmed);
     setKeySet(true);
     setKeyInput('');
@@ -215,7 +216,7 @@ export default function App() {
                   padding: '4px 10px',
                   cursor: 'pointer',
                 }}
-                onClick={() => { setKeySet(false); setApiKey(''); }}
+                onClick={() => { localStorage.removeItem('1ps_api_key'); setKeySet(false); setApiKey(''); }}
                 title="Click to reset key"
               >
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#00C48C', display: 'inline-block' }} />
