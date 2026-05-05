@@ -24,16 +24,10 @@ jobs:
       - name: Build React app
         run: npm run build
 
-      - name: Install functions dependencies
-        run: npm ci --prefix functions
-
-      - name: Build functions
-        run: npm run build --prefix functions
-
       - name: Write service account
         run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > /tmp/gsa.json
 
-      - name: Deploy hosting + functions
-        run: npx firebase-tools deploy --only hosting,functions --project onepstudio-9a3ef
+      - name: Deploy hosting
+        run: npx firebase-tools deploy --only hosting --project onepstudio-9a3ef
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/gsa.json
