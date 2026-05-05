@@ -18,16 +18,16 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install root dependencies
+      - name: Install dependencies
         run: npm ci
 
       - name: Build React app
         run: npm run build
 
-      - name: Write service account
-        run: echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > /tmp/gsa.json
-
-      - name: Deploy hosting
-        run: npx firebase-tools deploy --only hosting --project onepstudio-9a3ef
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gsa.json
+      - name: Deploy to Firebase Hosting
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          channelId: live
+          projectId: onepstudio-9a3ef
