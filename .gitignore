@@ -24,3 +24,7 @@ yarn-error.log*
 
 # testing
 /coverage
+
+# Next.js (not used in this project — CRA-based)
+next-env.d.ts
+.next/
