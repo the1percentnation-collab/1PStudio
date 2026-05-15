@@ -40,7 +40,7 @@ jobs:
         run: |
           echo "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/sa.json
           export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json
-          printf 'ANTHROPIC_API_KEY="%s"\n' "${ANTHROPIC_API_KEY}" > functions/.env
+          node -e "const fs=require('fs');fs.writeFileSync('functions/.env','ANTHROPIC_API_KEY='+process.env.ANTHROPIC_API_KEY+'\n')"
           firebase deploy --only functions --project onepstudio-9a3ef --force
 
       - name: Deploy to Firebase Hosting
