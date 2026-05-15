@@ -1,144 +1,119 @@
 import { initializeApp } from "firebase-admin/app";
 import { onRequest } from "firebase-functions/v2/https";
-import { onDocumentCreated } from "firebase-functions/v2/firestore";
-import Anthropic from "@anthropic-ai/sdk";
-import * as express from "express";
 
 initializeApp();
 
-const app = express();
-app.use(express.json());
+const SYSTEM_PROMPT = `You are a TikTok content strategist for The One Percent Nation, a self-help and leadership coaching brand. The creator is Anthony Brown, a Black male leader, real estate broker turned full-time entrepreneur, faith-adjacent, direct communicator, Oklahoma-based. His content pillars are: limiting beliefs, self-accountability, identity and mindset, leadership and purpose. His hook style: second-person identity challenges, truth bombs, direct confrontation of excuses.
 
-app.use((_req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (_req.method === "OPTIONS") {
-    res.sendStatus(204);
-    return;
-  }
-  next();
-});
+When a transcript is provided, use it as the primary source for all fields. When only frames are available, infer from visuals.
 
-app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", service: "1PStudio API" });
-});
+Return ONLY valid JSON with no markdown, no backticks, no preamble. Fields:
+- best_title (string): the single strongest video title — optimized for search and click-through, max 70 chars
+- on_screen_text (string): bold text overlay shown visually in the video — stop-scroll hook, max 8 words, all caps, punchy
+- niche (string): specific content niche, 2-4 words (e.g. "Entrepreneur Mindset", "Real Estate Motivation", "Self-Discipline")
+- thumbnail_text (string): text to print on the video thumbnail — max 6 words, high contrast, creates curiosity or urgency
+- video_description (string): full video description — 200-400 chars, opens with a hook, body adds context, ends with soft CTA
+- headline (string): punchy, all-caps title optimized for TikTok search — max 60 chars
+- seo_opener (string): first 3 seconds of spoken text or on-screen text that stops the scroll
+- caption (string): full TikTok caption including opening line, body, and soft CTA — 150-300 chars
+- hashtags (string): 12-15 hashtags, mix of niche, broad, and trending — space-separated
+- content_pillar (string): one of "Self-Sabotage & Limiting Beliefs", "Accountability & Execution", "Identity & Mindset Shift", "Leadership & Purpose"
+- hook_score (number 1-10): how strong the opening hook is
+- hook_score_reason (string): one sentence explaining the score and one concrete tip to improve it
+- titles (array of 3 strings): alternate video title options, each a different angle
+- transcript_summary (string): 1-2 sentence summary of what the video is about (derive from transcript if provided, otherwise from frames)`;
 
-app.post("/api/generate-tiktok", async (req, res) => {
-  const { topic, contentType, tone, duration, niche } = req.body as {
-    topic: string;
-    contentType: "hook" | "script" | "caption" | "full";
-    tone: string;
-    duration: string;
-    niche: string;
-  };
+type Frame = string | null | undefined;
 
-  if (!topic) {
-    res.status(400).json({ error: "topic is required" });
-    return;
-  }
+function imageBlock(base64: Frame, label: string): object[] {
+  if (!base64) return [];
+  return [
+    { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
+    { type: "text", text: label },
+  ];
+}
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    res.status(500).json({ error: "Anthropic API key not configured" });
-    return;
-  }
+export const analyzeVideo = onRequest(
+  {
+    cors: true,
+    timeoutSeconds: 120,
+    memory: "512MiB",
+  },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
 
-  const client = new Anthropic({ apiKey });
+    const { frames, transcript, filename } = req.body as {
+      frames?: { hookFrame?: Frame; midFrame?: Frame; endFrame?: Frame };
+      transcript?: string;
+      filename?: string;
+    };
 
-  const durationLabel = duration === "15" ? "15-second" : duration === "30" ? "30-second" : "60-second";
-  const toneLabel = tone || "engaging and entertaining";
-  const nicheLabel = niche || "general";
+    const contentBlocks: object[] = [
+      ...imageBlock(frames?.hookFrame, "[HOOK FRAME — opening shot]"),
+      ...imageBlock(frames?.midFrame, "[MID FRAME — ~45% through video]"),
+      ...imageBlock(frames?.endFrame, "[END FRAME — ~85% through video]"),
+    ];
 
-  const prompts: Record<string, string> = {
-    hook: `Generate 3 attention-grabbing TikTok hooks for a ${durationLabel} video about "${topic}" in the ${nicheLabel} niche. Tone: ${toneLabel}.
+    const transcriptSection = transcript?.trim()
+      ? `\n\nVIDEO TRANSCRIPT:\n"""\n${transcript.trim()}\n"""\n`
+      : "";
 
-Each hook should:
-- Be 1-2 sentences max
-- Start with a pattern interrupt or bold statement
-- Create curiosity or urgency
-- Work for a TikTok opening
-
-Format as:
-Hook 1: [hook text]
-Hook 2: [hook text]
-Hook 3: [hook text]`,
-
-    script: `Write a TikTok video script for a ${durationLabel} video about "${topic}" in the ${nicheLabel} niche. Tone: ${toneLabel}.
-
-Include:
-- HOOK (0-3s): Opening line to stop the scroll
-- BODY: Main content broken into short punchy beats
-- CTA (last 3s): Clear call to action
-
-Keep it conversational, fast-paced, and optimized for TikTok's format. Use [PAUSE], [TEXT ON SCREEN:], or [B-ROLL:] cues where helpful.`,
-
-    caption: `Write 3 TikTok captions for a video about "${topic}" in the ${nicheLabel} niche. Tone: ${toneLabel}.
-
-Each caption should:
-- Be under 150 characters (TikTok best practice)
-- Include a hook or question
-- Have a soft CTA
-- Feel native to TikTok
-
-Format as:
-Caption 1: [text]
-Caption 2: [text]
-Caption 3: [text]`,
-
-    full: `Create a complete TikTok content package for a ${durationLabel} video about "${topic}" in the ${nicheLabel} niche. Tone: ${toneLabel}.
-
-Provide:
-
-## HOOKS (pick one)
-3 attention-grabbing opening lines
-
-## VIDEO SCRIPT
-Full ${durationLabel} script with timing cues, dialogue, and visual directions
-
-## CAPTION
-Best caption option (under 150 chars) + 2 alternatives
-
-## HASHTAGS
-10-15 relevant hashtags — mix of niche, trending, and broad
-
-## POSTING TIPS
-2-3 quick tips for maximizing reach with this content`,
-  };
-
-  const promptKey = contentType || "full";
-  const prompt = prompts[promptKey] ?? prompts.full;
-
-  try {
-    const message = await client.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1024,
-      system:
-        "You are an expert TikTok content strategist who specializes in viral short-form video content. You understand TikTok's algorithm, trends, and what drives engagement. Write in a natural, conversational style that resonates with TikTok audiences.",
-      messages: [{ role: "user", content: prompt }],
+    contentBlocks.push({
+      type: "text",
+      text: `Video filename: "${filename ?? "unknown"}"${transcriptSection}\n\nGenerate the full content strategy JSON as instructed.`,
     });
 
-    const content = message.content[0];
-    if (content.type !== "text") {
-      res.status(500).json({ error: "Unexpected response type from AI" });
+    const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 1800,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content: contentBlocks }],
+      }),
+    });
+
+    if (!anthropicRes.ok) {
+      const err = await anthropicRes.json().catch(() => ({})) as { error?: { message?: string } };
+      res.status(anthropicRes.status).json({ error: err?.error?.message ?? `API error ${anthropicRes.status}` });
+      return;
+    }
+
+    const data = await anthropicRes.json() as { content?: { text?: string }[] };
+    const text = data.content?.[0]?.text ?? "";
+
+    let parsed: Record<string, unknown>;
+    try {
+      const match = text.match(/\{[\s\S]*\}/);
+      parsed = JSON.parse(match ? match[0] : text);
+    } catch {
+      res.status(500).json({ error: "Failed to parse Claude response as JSON" });
       return;
     }
 
     res.json({
-      result: content.text,
-      contentType: promptKey,
-      topic,
-      usage: message.usage,
+      best_title: parsed.best_title ?? "",
+      on_screen_text: parsed.on_screen_text ?? "",
+      niche: parsed.niche ?? "",
+      thumbnail_text: parsed.thumbnail_text ?? "",
+      video_description: parsed.video_description ?? "",
+      headline: parsed.headline ?? "",
+      seo_opener: parsed.seo_opener ?? "",
+      caption: parsed.caption ?? "",
+      hashtags: parsed.hashtags ?? "",
+      content_pillar: parsed.content_pillar ?? "Identity & Mindset Shift",
+      hook_score: typeof parsed.hook_score === "number" ? parsed.hook_score : 5,
+      hook_score_reason: parsed.hook_score_reason ?? "",
+      titles: Array.isArray(parsed.titles) ? parsed.titles : [],
+      transcript_summary: parsed.transcript_summary ?? "",
     });
-  } catch (err) {
-    console.error("Anthropic API error:", err);
-    res.status(500).json({ error: "Failed to generate content" });
   }
-});
-
-export const api = onRequest(app);
-
-export const onUserCreated = onDocumentCreated("users/{userId}", (event) => {
-  const data = event.data?.data();
-  console.log("New user created:", event.params.userId, data);
-});
+);
