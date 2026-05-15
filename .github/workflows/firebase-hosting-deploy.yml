@@ -24,6 +24,25 @@ jobs:
       - name: Build React app
         run: npm run build
 
+      - name: Install functions dependencies and build
+        run: |
+          cd functions
+          npm ci
+          npm run build
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Deploy Functions to Firebase
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          echo "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/sa.json
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json
+          echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" > functions/.env
+          firebase deploy --only functions --project onepstudio-9a3ef
+
       - name: Deploy to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
