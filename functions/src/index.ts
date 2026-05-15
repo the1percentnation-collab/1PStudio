@@ -1,5 +1,8 @@
 import { initializeApp } from "firebase-admin/app";
 import { onRequest } from "firebase-functions/v2/https";
+import { defineSecret } from "firebase-functions/params";
+
+const anthropicApiKey = defineSecret("ANTHROPIC_API_KEY");
 
 initializeApp();
 
@@ -38,6 +41,7 @@ export const analyzeVideo = onRequest(
     cors: true,
     timeoutSeconds: 120,
     memory: "512MiB",
+    secrets: [anthropicApiKey],
   },
   async (req, res) => {
     if (req.method !== "POST") {
@@ -70,7 +74,7 @@ export const analyzeVideo = onRequest(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
+        "x-api-key": anthropicApiKey.value(),
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
