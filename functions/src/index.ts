@@ -1,10 +1,7 @@
 import { initializeApp } from "firebase-admin/app";
 import { onRequest } from "firebase-functions/v2/https";
-import { defineSecret } from "firebase-functions/params";
 
 initializeApp();
-
-const anthropicApiKey = defineSecret("ANTHROPIC_API_KEY");
 
 const SYSTEM_PROMPT = `You are a TikTok content strategist for The One Percent Nation, a self-help and leadership coaching brand. The creator is Anthony Brown, a Black male leader, real estate broker turned full-time entrepreneur, faith-adjacent, direct communicator, Oklahoma-based. His content pillars are: limiting beliefs, self-accountability, identity and mindset, leadership and purpose. His hook style: second-person identity challenges, truth bombs, direct confrontation of excuses.
 
@@ -41,7 +38,6 @@ export const analyzeVideo = onRequest(
     cors: true,
     timeoutSeconds: 120,
     memory: "512MiB",
-    secrets: ["ANTHROPIC_API_KEY"],
   },
   async (req, res) => {
     if (req.method !== "POST") {
@@ -49,7 +45,7 @@ export const analyzeVideo = onRequest(
       return;
     }
 
-    const apiKey = anthropicApiKey.value();
+    const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       res.status(500).json({ error: "Server configuration error: ANTHROPIC_API_KEY is not set" });
       return;
@@ -80,7 +76,7 @@ export const analyzeVideo = onRequest(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": apiKey,
+        "x-api-key": apiKey ?? "",
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
