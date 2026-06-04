@@ -37,83 +37,96 @@ export const analyzeVideo = onRequest(
   {
     cors: true,
     timeoutSeconds: 120,
-    memory: "512MiB",
+    memory: "1GiB",
   },
   async (req, res) => {
-    if (req.method !== "POST") {
-      res.status(405).json({ error: "Method not allowed" });
-      return;
-    }
-
-    const { frames, transcript, filename } = req.body as {
-      frames?: { hookFrame?: Frame; midFrame?: Frame; endFrame?: Frame };
-      transcript?: string;
-      filename?: string;
-    };
-
-    const contentBlocks: object[] = [
-      ...imageBlock(frames?.hookFrame, "[HOOK FRAME — opening shot]"),
-      ...imageBlock(frames?.midFrame, "[MID FRAME — ~45% through video]"),
-      ...imageBlock(frames?.endFrame, "[END FRAME — ~85% through video]"),
-    ];
-
-    const transcriptSection = transcript?.trim()
-      ? `\n\nVIDEO TRANSCRIPT:\n"""\n${transcript.trim()}\n"""\n`
-      : "";
-
-    contentBlocks.push({
-      type: "text",
-      text: `Video filename: "${filename ?? "unknown"}"${transcriptSection}\n\nGenerate the full content strategy JSON as instructed.`,
-    });
-
-    const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1800,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: contentBlocks }],
-      }),
-    });
-
-    if (!anthropicRes.ok) {
-      const err = await anthropicRes.json().catch(() => ({})) as { error?: { message?: string } };
-      res.status(anthropicRes.status).json({ error: err?.error?.message ?? `API error ${anthropicRes.status}` });
-      return;
-    }
-
-    const data = await anthropicRes.json() as { content?: { text?: string }[] };
-    const text = data.content?.[0]?.text ?? "";
-
-    let parsed: Record<string, unknown>;
     try {
-      const match = text.match(/\{[\s\S]*\}/);
-      parsed = JSON.parse(match ? match[0] : text);
-    } catch {
-      res.status(500).json({ error: "Failed to parse Claude response as JSON" });
-      return;
-    }
+      if (req.method !== "POST") {
+        res.status(405).json({ error: "Method not allowed" });
+        return;
+      }
 
-    res.json({
-      best_title: parsed.best_title ?? "",
-      on_screen_text: parsed.on_screen_text ?? "",
-      niche: parsed.niche ?? "",
-      thumbnail_text: parsed.thumbnail_text ?? "",
-      video_description: parsed.video_description ?? "",
-      headline: parsed.headline ?? "",
-      seo_opener: parsed.seo_opener ?? "",
-      caption: parsed.caption ?? "",
-      hashtags: parsed.hashtags ?? "",
-      content_pillar: parsed.content_pillar ?? "Identity & Mindset Shift",
-      hook_score: typeof parsed.hook_score === "number" ? parsed.hook_score : 5,
-      hook_score_reason: parsed.hook_score_reason ?? "",
-      titles: Array.isArray(parsed.titles) ? parsed.titles : [],
-      transcript_summary: parsed.transcript_summary ?? "",
-    });
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) {
+        res.status(500).json({
+          error: "Server is missing ANTHROPIC_API_KEY. Set it on the function and redeploy.",
+        });
+        return;
+      }
+
+      const { frames, transcript, filename } = req.body as {
+        frames?: { hookFrame?: Frame; midFrame?: Frame; endFrame?: Frame };
+        transcript?: string;
+        filename?: string;
+      };
+
+      const contentBlocks: object[] = [
+        ...imageBlock(frames?.hookFrame, "[HOOK FRAME — opening shot]"),
+        ...imageBlock(frames?.midFrame, "[MID FRAME — ~45% through video]"),
+        ...imageBlock(frames?.endFrame, "[END FRAME — ~85% through video]"),
+      ];
+
+      const transcriptSection = transcript?.trim()
+        ? `\n\nVIDEO TRANSCRIPT:\n"""\n${transcript.trim()}\n"""\n`
+        : "";
+
+      contentBlocks.push({
+        type: "text",
+        text: `Video filename: "${filename ?? "unknown"}"${transcriptSection}\n\nGenerate the full content strategy JSON as instructed.`,
+      });
+
+      const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 1800,
+          system: SYSTEM_PROMPT,
+          messages: [{ role: "user", content: contentBlocks }],
+        }),
+      });
+
+      if (!anthropicRes.ok) {
+        const err = await anthropicRes.json().catch(() => ({})) as { error?: { message?: string } };
+        res.status(anthropicRes.status).json({ error: err?.error?.message ?? `API error ${anthropicRes.status}` });
+        return;
+      }
+
+      const data = await anthropicRes.json().catch(() => null) as { content?: { text?: string }[] } | null;
+      const text = data?.content?.[0]?.text ?? "";
+
+      let parsed: Record<string, unknown>;
+      try {
+        const match = text.match(/\{[\s\S]*\}/);
+        parsed = JSON.parse(match ? match[0] : text);
+      } catch {
+        res.status(500).json({ error: "Failed to parse Claude response as JSON" });
+        return;
+      }
+
+      res.json({
+        best_title: parsed.best_title ?? "",
+        on_screen_text: parsed.on_screen_text ?? "",
+        niche: parsed.niche ?? "",
+        thumbnail_text: parsed.thumbnail_text ?? "",
+        video_description: parsed.video_description ?? "",
+        headline: parsed.headline ?? "",
+        seo_opener: parsed.seo_opener ?? "",
+        caption: parsed.caption ?? "",
+        hashtags: parsed.hashtags ?? "",
+        content_pillar: parsed.content_pillar ?? "Identity & Mindset Shift",
+        hook_score: typeof parsed.hook_score === "number" ? parsed.hook_score : 5,
+        hook_score_reason: parsed.hook_score_reason ?? "",
+        titles: Array.isArray(parsed.titles) ? parsed.titles : [],
+        transcript_summary: parsed.transcript_summary ?? "",
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Unexpected server error";
+      res.status(500).json({ error: `Function error: ${message}` });
+    }
   }
 );
