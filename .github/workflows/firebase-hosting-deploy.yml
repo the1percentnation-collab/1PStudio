@@ -43,8 +43,16 @@ jobs:
           export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json
           # firebase-functions v2 auto-loads functions/.env at runtime.
           # (firebase deploy has no --set-env-vars flag — that's a gcloud flag.)
-          echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" > functions/.env
-          echo "AYRSHARE_API_KEY=${AYRSHARE_API_KEY}" >> functions/.env
+          # Strip stray CR/LF/whitespace from secret values so a valid,
+          # single-line dotenv file is written, and skip empty keys.
+          ANTHROPIC_CLEAN="$(printf '%s' "$ANTHROPIC_API_KEY" | tr -d '\r\n' | xargs)"
+          AYRSHARE_CLEAN="$(printf '%s' "$AYRSHARE_API_KEY" | tr -d '\r\n' | xargs)"
+          {
+            printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_CLEAN"
+            if [ -n "$AYRSHARE_CLEAN" ]; then
+              printf 'AYRSHARE_API_KEY=%s\n' "$AYRSHARE_CLEAN"
+            fi
+          } > functions/.env
           # Storage rules are deployed manually from the console (the default
           # bucket must be initialized first); CI deploys functions only.
           firebase deploy --only functions --project onepstudio-9a3ef --force
