@@ -23,6 +23,13 @@ const ICONS = {
       <line x1="3" y1="10" x2="21" y2="10" />
     </>
   ),
+  analytics: (
+    <>
+      <line x1="6" y1="20" x2="6" y2="14" />
+      <line x1="12" y1="20" x2="12" y2="4" />
+      <line x1="18" y1="20" x2="18" y2="10" />
+    </>
+  ),
   library: (
     <>
       <polygon points="12 2 2 7 12 12 22 7 12 2" />
@@ -53,6 +60,7 @@ const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
   { id: 'composer', label: 'Composer', icon: 'composer' },
   { id: 'calendar', label: 'Calendar', icon: 'calendar' },
+  { id: 'analytics', label: 'Analytics', icon: 'analytics' },
   { id: 'library', label: 'Library', icon: 'library' },
 ];
 

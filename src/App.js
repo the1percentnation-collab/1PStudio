@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import CalendarView from './components/CalendarView';
+import Analytics from './components/Analytics';
 import DropZone from './components/DropZone';
 import VideoCard from './components/VideoCard';
 import QueueProgress from './components/QueueProgress';
@@ -35,6 +36,7 @@ const VIEW_META = {
   dashboard: { title: 'Dashboard', subtitle: 'Your content at a glance' },
   composer: { title: 'Composer', subtitle: 'Generate and publish content' },
   calendar: { title: 'Content Calendar', subtitle: 'Scheduled & published posts' },
+  analytics: { title: 'Analytics', subtitle: 'Performance & content insights' },
   library: { title: 'Library', subtitle: 'Saved generated content' },
 };
 
@@ -156,6 +158,9 @@ export default function App() {
     }
     if (view === 'calendar') {
       return <CalendarView posts={posts} onNavigate={setView} isMobile={isMobile} />;
+    }
+    if (view === 'analytics') {
+      return <Analytics library={library} posts={posts} />;
     }
     if (view === 'library') {
       return <LibraryView library={library} onDelete={handleLibraryDelete} />;
