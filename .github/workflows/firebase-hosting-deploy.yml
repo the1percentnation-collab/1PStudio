@@ -37,10 +37,12 @@ jobs:
         env:
           GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AYRSHARE_API_KEY: ${{ secrets.AYRSHARE_API_KEY }}
         run: |
           echo "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/sa.json
           export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json
           echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" > functions/.env
+          echo "AYRSHARE_API_KEY=${AYRSHARE_API_KEY}" >> functions/.env
           firebase deploy --only functions --project onepstudio-9a3ef
 
       - name: Deploy to Firebase Hosting
