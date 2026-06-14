@@ -37,6 +37,12 @@ const ICONS = {
       <polyline points="2 12 12 17 22 12" />
     </>
   ),
+  accounts: (
+    <>
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </>
+  ),
 };
 
 function Icon({ name }) {
@@ -62,6 +68,7 @@ const NAV = [
   { id: 'calendar', label: 'Calendar', icon: 'calendar' },
   { id: 'analytics', label: 'Analytics', icon: 'analytics' },
   { id: 'library', label: 'Library', icon: 'library' },
+  { id: 'accounts', label: 'Accounts', icon: 'accounts' },
 ];
 
 export default function Sidebar({ active, onNavigate, counts = {}, isMobile = false }) {

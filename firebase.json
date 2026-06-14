@@ -25,6 +25,11 @@
         "region": "us-central1"
       },
       {
+        "source": "/api/accounts",
+        "function": "accountsStatus",
+        "region": "us-central1"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

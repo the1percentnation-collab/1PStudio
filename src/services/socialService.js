@@ -45,6 +45,16 @@ export async function uploadVideo(videoFile, onProgress) {
   return getDownloadURL(task.snapshot.ref);
 }
 
+// Fetches which social accounts are connected in Ayrshare.
+export async function getConnectedAccounts() {
+  const response = await fetch('/api/accounts');
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.error || `Failed to load accounts (${response.status})`);
+  }
+  return data; // { configured, connected: [ids], displayNames: [{platform, displayName}], error? }
+}
+
 export async function publishToSocial(videoFile, { post, title, platforms, scheduleDate, onProgress }) {
   if (!videoFile) {
     throw new Error('No video file is attached to this card — regenerate it from an upload to enable posting.');

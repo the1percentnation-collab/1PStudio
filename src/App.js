@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import CalendarView from './components/CalendarView';
 import Analytics from './components/Analytics';
+import AccountsView from './components/AccountsView';
 import DropZone from './components/DropZone';
 import VideoCard from './components/VideoCard';
 import QueueProgress from './components/QueueProgress';
@@ -38,6 +39,7 @@ const VIEW_META = {
   calendar: { title: 'Content Calendar', subtitle: 'Scheduled & published posts' },
   analytics: { title: 'Analytics', subtitle: 'Performance & content insights' },
   library: { title: 'Library', subtitle: 'Saved generated content' },
+  accounts: { title: 'Accounts', subtitle: 'Connect your social platforms' },
 };
 
 export default function App() {
@@ -164,6 +166,9 @@ export default function App() {
     }
     if (view === 'library') {
       return <LibraryView library={library} onDelete={handleLibraryDelete} />;
+    }
+    if (view === 'accounts') {
+      return <AccountsView />;
     }
     // composer
     return (

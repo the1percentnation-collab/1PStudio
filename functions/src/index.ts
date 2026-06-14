@@ -245,3 +245,61 @@ export const publishPost = onRequest(
     }
   }
 );
+
+// ---------------------------------------------------------------------------
+// Connected-account status — reads which social accounts are linked in
+// Ayrshare so the app can show live connection state. Accounts are linked in
+// the Ayrshare dashboard; this just reports their status.
+// ---------------------------------------------------------------------------
+
+// Map Ayrshare platform ids back to our app's ids (X is "twitter" in Ayrshare).
+const FROM_AYRSHARE: Record<string, string> = {
+  tiktok: "tiktok",
+  instagram: "instagram",
+  youtube: "youtube",
+  facebook: "facebook",
+  twitter: "x",
+  linkedin: "linkedin",
+};
+
+export const accountsStatus = onRequest(
+  {
+    cors: true,
+    timeoutSeconds: 30,
+    memory: "256MiB",
+  },
+  async (_req, res) => {
+    const apiKey = process.env.AYRSHARE_API_KEY;
+    if (!apiKey) {
+      res.status(200).json({ configured: false, connected: [], displayNames: [] });
+      return;
+    }
+
+    try {
+      const ayrRes = await fetch("https://api.ayrshare.com/api/user", {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      const data = (await ayrRes.json().catch(() => ({}))) as {
+        activeSocialAccounts?: string[];
+        displayNames?: { platform?: string; displayName?: string }[];
+      };
+
+      if (!ayrRes.ok) {
+        res.status(200).json({ configured: true, connected: [], displayNames: [], error: `Ayrshare error ${ayrRes.status}` });
+        return;
+      }
+
+      const connected = Array.from(
+        new Set((data.activeSocialAccounts ?? []).map((p) => FROM_AYRSHARE[p] ?? p))
+      );
+      const displayNames = (data.displayNames ?? []).map((d) => ({
+        platform: FROM_AYRSHARE[d.platform ?? ""] ?? d.platform,
+        displayName: d.displayName,
+      }));
+
+      res.json({ configured: true, connected, displayNames });
+    } catch (e) {
+      res.status(200).json({ configured: true, connected: [], displayNames: [], error: e instanceof Error ? e.message : "unknown error" });
+    }
+  }
+);
