@@ -13,6 +13,7 @@ export default function PublishPanel({ videoFile, content }) {
   const [title, setTitle] = useState(content?.best_title || content?.headline || '');
   const [status, setStatus] = useState(null); // { type: 'ok'|'error', message }
   const [posting, setPosting] = useState(false);
+  const [progress, setProgress] = useState(0); // 0..1 upload progress
 
   const togglePlatform = (id) => {
     setSelected((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
@@ -21,8 +22,14 @@ export default function PublishPanel({ videoFile, content }) {
   const handlePost = async () => {
     setPosting(true);
     setStatus(null);
+    setProgress(0);
     try {
-      await publishToSocial(videoFile, { post: caption, title, platforms: selected });
+      await publishToSocial(videoFile, {
+        post: caption,
+        title,
+        platforms: selected,
+        onProgress: setProgress,
+      });
       setStatus({ type: 'ok', message: `Posted to ${selected.length} platform${selected.length !== 1 ? 's' : ''}.` });
     } catch (err) {
       setStatus({ type: 'error', message: err.message });
@@ -30,6 +37,8 @@ export default function PublishPanel({ videoFile, content }) {
       setPosting(false);
     }
   };
+
+  const uploadPct = Math.round(progress * 100);
 
   const canPost = !posting && selected.length > 0 && caption.trim() && videoFile;
 
@@ -147,6 +156,24 @@ export default function PublishPanel({ videoFile, content }) {
       {!videoFile && (
         <div style={{ fontSize: 11, color: '#FFC107', marginBottom: 10, lineHeight: 1.45 }}>
           This card has no attached video file (e.g. loaded from Library), so it can’t be posted. Re-upload the video to post it.
+        </div>
+      )}
+
+      {posting && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ height: 6, background: '#1A1A1A', borderRadius: 3, overflow: 'hidden' }}>
+            <div
+              style={{
+                width: `${uploadPct}%`,
+                height: '100%',
+                background: '#00C48C',
+                transition: 'width 0.2s',
+              }}
+            />
+          </div>
+          <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>
+            {uploadPct < 100 ? `Uploading video… ${uploadPct}%` : 'Publishing to platforms…'}
+          </div>
         </div>
       )}
 

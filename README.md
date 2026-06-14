@@ -60,19 +60,25 @@ app-review for each network individually.
    - **Local:** add `AYRSHARE_API_KEY=your-key` to `functions/.env`
    - **CI/CD:** add a GitHub repo secret named `AYRSHARE_API_KEY`
      (the deploy workflow already writes it into `functions/.env`)
+4. **Enable Anonymous sign-in** in the Firebase console
+   (Authentication → Sign-in method → Anonymous). Videos upload directly from
+   the browser to Firebase Storage, and the Storage rules require an
+   authenticated request — anonymous auth satisfies this with no login UI.
 
 ### How to post
 
 1. Upload a video and let Claude generate the content
 2. On the generated card, click **Post to Social**
 3. Tap the platform chips you want, tweak the caption/title, and click **Post Now**
-4. The video is stored in Firebase Storage and handed to Ayrshare, which posts to
-   every selected platform
+4. The video uploads straight from your browser to Firebase Storage (with a live
+   progress bar), then Ayrshare pulls that URL and posts to every selected platform
 
-> **Notes:** Instagram video posts publish as Reels and YouTube uses the Title
-> field. Direct publishing is limited to videos under **30 MB** (the Cloud
-> Function request limit) — for larger files, upload to Storage first and post by
-> URL. Cards loaded from the Library have no attached file and can't be posted.
+> **Notes:** The video uploads directly from the browser to Storage, so there is
+> **no app-imposed size cap** — long videos work, limited only by each platform's
+> own ceiling (e.g. YouTube Shorts ≤ 3 min, Instagram Reels ~15 min, X 2:20 on
+> the free tier). Instagram video posts publish as Reels and YouTube uses the
+> Title field. Cards loaded from the Library have no attached file and can't be
+> posted.
 
 ## Firebase Deployment
 

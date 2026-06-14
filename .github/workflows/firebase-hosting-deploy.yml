@@ -43,7 +43,7 @@ jobs:
           export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json
           echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" > functions/.env
           echo "AYRSHARE_API_KEY=${AYRSHARE_API_KEY}" >> functions/.env
-          firebase deploy --only functions --project onepstudio-9a3ef
+          firebase deploy --only functions,storage --project onepstudio-9a3ef
 
       - name: Deploy to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0

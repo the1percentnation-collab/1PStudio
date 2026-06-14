@@ -1,7 +1,13 @@
-// Publishes a video + caption to the selected social platforms via the
-// Ayrshare-backed Cloud Function (see functions/src/index.ts -> publishPost).
+// Publishes a video + caption to the selected social platforms.
+//
+// The video is uploaded DIRECTLY from the browser to Firebase Storage (no
+// Cloud Function size cap, so long videos work — limited only by each
+// platform's own ceiling), then the resulting URL is handed to the
+// Ayrshare-backed publishPost function which posts to every platform.
 //
 // platforms is an array of: 'tiktok' | 'instagram' | 'youtube' | 'facebook' | 'x' | 'linkedin'
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { storage, ensureAuth } from './firebase';
 
 export const SOCIAL_PLATFORMS = [
   { id: 'tiktok', label: 'TikTok' },
@@ -12,7 +18,34 @@ export const SOCIAL_PLATFORMS = [
   { id: 'linkedin', label: 'LinkedIn' },
 ];
 
-export async function publishToSocial(videoFile, { post, title, platforms }) {
+// Uploads the video to Storage and returns a public download URL.
+// onProgress receives a 0..1 fraction.
+export async function uploadVideo(videoFile, onProgress) {
+  await ensureAuth();
+
+  const safeName = videoFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const path = `social-posts/${Date.now()}-${safeName}`;
+  const task = uploadBytesResumable(ref(storage, path), videoFile, {
+    contentType: videoFile.type || 'video/mp4',
+  });
+
+  await new Promise((resolve, reject) => {
+    task.on(
+      'state_changed',
+      (snap) => {
+        if (onProgress && snap.totalBytes) {
+          onProgress(snap.bytesTransferred / snap.totalBytes);
+        }
+      },
+      reject,
+      resolve
+    );
+  });
+
+  return getDownloadURL(task.snapshot.ref);
+}
+
+export async function publishToSocial(videoFile, { post, title, platforms, onProgress }) {
   if (!videoFile) {
     throw new Error('No video file is attached to this card — regenerate it from an upload to enable posting.');
   }
@@ -23,13 +56,12 @@ export async function publishToSocial(videoFile, { post, title, platforms }) {
     throw new Error('Caption is required to publish.');
   }
 
-  const form = new FormData();
-  form.append('meta', JSON.stringify({ post, title, platforms }));
-  form.append('video', videoFile, videoFile.name);
+  const mediaUrl = await uploadVideo(videoFile, onProgress);
 
   const response = await fetch('/api/publish', {
     method: 'POST',
-    body: form,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mediaUrl, post, title, platforms }),
   });
 
   const data = await response.json().catch(() => ({}));
