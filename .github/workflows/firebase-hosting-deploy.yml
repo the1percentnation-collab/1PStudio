@@ -41,7 +41,11 @@ jobs:
         run: |
           echo "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/sa.json
           export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json
-          firebase deploy --only functions,storage --project onepstudio-9a3ef --force --set-env-vars "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY},AYRSHARE_API_KEY=${AYRSHARE_API_KEY}"
+          # firebase-functions v2 auto-loads functions/.env at runtime.
+          # (firebase deploy has no --set-env-vars flag — that's a gcloud flag.)
+          echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" > functions/.env
+          echo "AYRSHARE_API_KEY=${AYRSHARE_API_KEY}" >> functions/.env
+          firebase deploy --only functions,storage --project onepstudio-9a3ef --force
 
       - name: Deploy to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
