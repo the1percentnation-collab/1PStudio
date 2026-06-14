@@ -155,6 +155,7 @@ interface PublishBody {
   post?: string;
   title?: string;
   platforms?: string[];
+  scheduleDate?: string;
 }
 
 export const publishPost = onRequest(
@@ -175,7 +176,7 @@ export const publishPost = onRequest(
       return;
     }
 
-    const { mediaUrl, post, title: rawTitle, platforms: rawPlatforms } = (req.body ?? {}) as PublishBody;
+    const { mediaUrl, post, title: rawTitle, platforms: rawPlatforms, scheduleDate } = (req.body ?? {}) as PublishBody;
 
     const requested = (rawPlatforms ?? []).map((p) => p.toLowerCase());
     const platforms = Array.from(
@@ -212,6 +213,11 @@ export const publishPost = onRequest(
     if (platforms.includes("instagram")) {
       // Video posts to Instagram publish as Reels.
       body.instagramOptions = { reels: true };
+    }
+
+    // Optional scheduling — Ayrshare accepts an ISO 8601 UTC date in the future.
+    if (scheduleDate && !Number.isNaN(Date.parse(scheduleDate))) {
+      body.scheduleDate = new Date(scheduleDate).toISOString();
     }
 
     // Fan the post out.

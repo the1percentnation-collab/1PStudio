@@ -248,7 +248,7 @@ function TranscriptPanel({ onRegenerate, isRegenerating }) {
   );
 }
 
-export default function VideoCard({ result, onRegenerate, onRemove }) {
+export default function VideoCard({ result, onRegenerate, onRemove, onPublished }) {
   const { id, filename, frames, content, error, _file } = result;
   const [isRegenerating, setIsRegenerating] = useState(false);
   const pillarColor = content ? (PILLAR_COLORS[content.content_pillar] || '#888') : '#888';
@@ -410,7 +410,15 @@ export default function VideoCard({ result, onRegenerate, onRemove }) {
           </button>
         )}
 
-        {content && <PublishPanel videoFile={_file} content={content} />}
+        {content && (
+          <PublishPanel
+            videoFile={_file}
+            content={content}
+            onPublished={onPublished}
+            filename={filename}
+            thumbnail={frames?.hookFrame}
+          />
+        )}
 
         <button
           onClick={() => handleRegenerate('')}

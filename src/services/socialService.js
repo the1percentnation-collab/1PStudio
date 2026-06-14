@@ -45,7 +45,7 @@ export async function uploadVideo(videoFile, onProgress) {
   return getDownloadURL(task.snapshot.ref);
 }
 
-export async function publishToSocial(videoFile, { post, title, platforms, onProgress }) {
+export async function publishToSocial(videoFile, { post, title, platforms, scheduleDate, onProgress }) {
   if (!videoFile) {
     throw new Error('No video file is attached to this card — regenerate it from an upload to enable posting.');
   }
@@ -61,7 +61,7 @@ export async function publishToSocial(videoFile, { post, title, platforms, onPro
   const response = await fetch('/api/publish', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mediaUrl, post, title, platforms }),
+    body: JSON.stringify({ mediaUrl, post, title, platforms, scheduleDate }),
   });
 
   const data = await response.json().catch(() => ({}));

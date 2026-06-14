@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { SOCIAL_PLATFORMS, publishToSocial } from '../services/socialService';
 
-export default function PublishPanel({ videoFile, content }) {
+export default function PublishPanel({ videoFile, content, onPublished, filename, thumbnail }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState([]);
+  const [scheduleOn, setScheduleOn] = useState(false);
+  const [scheduleAt, setScheduleAt] = useState('');
   const [caption, setCaption] = useState(() => {
     const parts = [];
     if (content?.caption) parts.push(content.caption);
@@ -20,6 +22,12 @@ export default function PublishPanel({ videoFile, content }) {
   };
 
   const handlePost = async () => {
+    const scheduleDate = scheduleOn && scheduleAt ? new Date(scheduleAt).toISOString() : null;
+    if (scheduleOn && !scheduleAt) {
+      setStatus({ type: 'error', message: 'Pick a date and time to schedule.' });
+      return;
+    }
+
     setPosting(true);
     setStatus(null);
     setProgress(0);
@@ -28,9 +36,28 @@ export default function PublishPanel({ videoFile, content }) {
         post: caption,
         title,
         platforms: selected,
+        scheduleDate,
         onProgress: setProgress,
       });
-      setStatus({ type: 'ok', message: `Posted to ${selected.length} platform${selected.length !== 1 ? 's' : ''}.` });
+      const isScheduled = Boolean(scheduleDate);
+      setStatus({
+        type: 'ok',
+        message: isScheduled
+          ? `Scheduled for ${new Date(scheduleDate).toLocaleString()} on ${selected.length} platform${selected.length !== 1 ? 's' : ''}.`
+          : `Posted to ${selected.length} platform${selected.length !== 1 ? 's' : ''}.`,
+      });
+      if (onPublished) {
+        onPublished({
+          id: `post-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          caption,
+          title,
+          platforms: selected,
+          filename,
+          thumbnail: thumbnail || null,
+          date: scheduleDate || new Date().toISOString(),
+          status: isScheduled ? 'scheduled' : 'published',
+        });
+      }
     } catch (err) {
       setStatus({ type: 'error', message: err.message });
     } finally {
@@ -153,6 +180,38 @@ export default function PublishPanel({ videoFile, content }) {
         }}
       />
 
+      {/* SCHEDULE */}
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#999', marginBottom: scheduleOn ? 8 : 10, cursor: 'pointer' }}>
+        <input
+          type="checkbox"
+          checked={scheduleOn}
+          onChange={(e) => setScheduleOn(e.target.checked)}
+          style={{ accentColor: '#E60306', width: 15, height: 15 }}
+        />
+        Schedule for later
+      </label>
+      {scheduleOn && (
+        <input
+          type="datetime-local"
+          value={scheduleAt}
+          min={new Date(Date.now() + 5 * 60000).toISOString().slice(0, 16)}
+          onChange={(e) => setScheduleAt(e.target.value)}
+          style={{
+            width: '100%',
+            background: '#111',
+            border: '1px solid #2A2A2A',
+            borderRadius: 8,
+            color: '#DDD',
+            fontSize: 12,
+            padding: '8px 10px',
+            boxSizing: 'border-box',
+            marginBottom: 10,
+            fontFamily: 'inherit',
+            colorScheme: 'dark',
+          }}
+        />
+      )}
+
       {!videoFile && (
         <div style={{ fontSize: 11, color: '#FFC107', marginBottom: 10, lineHeight: 1.45 }}>
           This card has no attached video file (e.g. loaded from Library), so it can’t be posted. Re-upload the video to post it.
@@ -209,7 +268,7 @@ export default function PublishPanel({ videoFile, content }) {
             transition: 'opacity 0.2s',
           }}
         >
-          {posting ? 'Posting…' : 'Post Now'}
+          {posting ? 'Working…' : scheduleOn ? 'Schedule Post' : 'Post Now'}
         </button>
         <button
           onClick={() => setOpen(false)}

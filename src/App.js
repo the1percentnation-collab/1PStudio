@@ -1,4 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import Sidebar from './components/Sidebar';
+import Dashboard from './components/Dashboard';
+import CalendarView from './components/CalendarView';
 import DropZone from './components/DropZone';
 import VideoCard from './components/VideoCard';
 import QueueProgress from './components/QueueProgress';
@@ -6,40 +9,54 @@ import LibraryView from './components/LibraryView';
 import { generateTikTokContent } from './services/claudeService';
 
 const LIBRARY_KEY = '1p-studio-library';
+const POSTS_KEY = '1p-studio-posts';
 
 let idCounter = 0;
 const uid = () => `v-${++idCounter}-${Date.now()}`;
 
-function loadLibrary() {
+function loadJSON(key) {
   try {
-    const raw = localStorage.getItem(LIBRARY_KEY);
+    const raw = localStorage.getItem(key);
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
 }
 
-function saveLibrary(items) {
+function saveJSON(key, items) {
   try {
-    localStorage.setItem(LIBRARY_KEY, JSON.stringify(items));
+    localStorage.setItem(key, JSON.stringify(items));
   } catch {
     // storage quota exceeded — fail silently
   }
 }
 
+const VIEW_META = {
+  dashboard: { title: 'Dashboard', subtitle: 'Your content at a glance' },
+  composer: { title: 'Composer', subtitle: 'Generate and publish content' },
+  calendar: { title: 'Content Calendar', subtitle: 'Scheduled & published posts' },
+  library: { title: 'Library', subtitle: 'Saved generated content' },
+};
+
 export default function App() {
   const [queue, setQueue] = useState([]);
   const [results, setResults] = useState([]);
   const [processing, setProcessing] = useState(false);
-  const [activeTab, setActiveTab] = useState('upload');
-  const [library, setLibrary] = useState(loadLibrary);
+  const [view, setView] = useState('dashboard');
+  const [library, setLibrary] = useState(() => loadJSON(LIBRARY_KEY));
+  const [posts, setPosts] = useState(() => loadJSON(POSTS_KEY));
+  const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 768 : false));
+
+  useEffect(() => { saveJSON(LIBRARY_KEY, library); }, [library]);
+  useEffect(() => { saveJSON(POSTS_KEY, posts); }, [posts]);
 
   useEffect(() => {
-    saveLibrary(library);
-  }, [library]);
+    const onResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   const addToLibrary = useCallback((entry) => {
-    // only store hookFrame for thumbnail; skip mid/end to stay within storage limits
     const libraryEntry = {
       id: entry.id,
       filename: entry.filename,
@@ -53,6 +70,10 @@ export default function App() {
 
   const handleLibraryDelete = useCallback((id) => {
     setLibrary((prev) => prev.filter((i) => i.id !== id));
+  }, []);
+
+  const handlePublished = useCallback((record) => {
+    setPosts((prev) => [record, ...prev]);
   }, []);
 
   const updateQueueItem = useCallback((id, patch) => {
@@ -95,11 +116,9 @@ export default function App() {
 
       setQueue((prev) => [...prev, ...items]);
       setProcessing(true);
-
       for (const item of items) {
         await processFile(item);
       }
-
       setProcessing(false);
     },
     [processFile]
@@ -113,13 +132,7 @@ export default function App() {
       setResults((prev) => prev.filter((r) => r.id !== id));
 
       const newId = uid();
-      const queueItem = {
-        id: newId,
-        file: result._file,
-        filename: result.filename,
-        status: 'waiting',
-        message: '',
-      };
+      const queueItem = { id: newId, file: result._file, filename: result.filename, status: 'waiting', message: '' };
 
       setQueue((prev) => [...prev, queueItem]);
       setProcessing(true);
@@ -134,98 +147,91 @@ export default function App() {
   }, []);
 
   const isQueueActive = queue.some((i) => i.status === 'waiting' || i.status === 'processing');
+  const meta = VIEW_META[view];
+  const contentMax = view === 'composer' ? 860 : 1120;
 
-  const tabStyle = (tab) => ({
-    fontFamily: "'Bebas Neue', sans-serif",
-    fontSize: 15,
-    letterSpacing: '0.08em',
-    color: activeTab === tab ? '#FFFFFF' : '#555',
-    background: 'transparent',
-    border: 'none',
-    borderBottom: `2px solid ${activeTab === tab ? '#E60306' : 'transparent'}`,
-    padding: '4px 2px',
-    cursor: 'pointer',
-    transition: 'color 0.2s',
-  });
+  const renderView = () => {
+    if (view === 'dashboard') {
+      return <Dashboard library={library} posts={posts} onNavigate={setView} />;
+    }
+    if (view === 'calendar') {
+      return <CalendarView posts={posts} onNavigate={setView} isMobile={isMobile} />;
+    }
+    if (view === 'library') {
+      return <LibraryView library={library} onDelete={handleLibraryDelete} />;
+    }
+    // composer
+    return (
+      <>
+        <DropZone onFilesSelected={handleFilesSelected} processing={processing} />
+
+        {isQueueActive && (
+          <div style={{ marginTop: 24 }}>
+            <QueueProgress queue={queue} />
+          </div>
+        )}
+
+        {results.length > 0 && (
+          <div style={{ marginTop: 32 }}>
+            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, letterSpacing: '0.06em', color: '#555', marginBottom: 16 }}>
+              GENERATED CONTENT — {results.length} video{results.length !== 1 ? 's' : ''}
+            </div>
+            {results.map((result) => (
+              <VideoCard
+                key={result.id}
+                result={result}
+                onRegenerate={handleRegenerate}
+                onRemove={handleRemove}
+                onPublished={handlePublished}
+              />
+            ))}
+          </div>
+        )}
+      </>
+    );
+  };
 
   return (
     <div style={{ minHeight: '100vh', background: '#0A0A0A' }}>
-      {/* STICKY HEADER */}
-      <header
-        style={{
-          position: 'sticky',
-          top: 0,
-          zIndex: 100,
-          background: 'rgba(10,10,10,0.95)',
-          backdropFilter: 'blur(8px)',
-          borderBottom: '1px solid #1A1A1A',
-          padding: '0 24px',
-        }}
-      >
-        <div
+      <Sidebar active={view} onNavigate={setView} counts={{ library: library.length }} isMobile={isMobile} />
+
+      <div style={{ marginLeft: isMobile ? 0 : 220 }}>
+        {/* TOP BAR */}
+        <header
           style={{
-            maxWidth: 760,
-            margin: '0 auto',
+            position: 'sticky',
+            top: 0,
+            zIndex: 100,
+            height: 60,
+            background: 'rgba(10,10,10,0.92)',
+            backdropFilter: 'blur(8px)',
+            borderBottom: '1px solid #1A1A1A',
             display: 'flex',
             alignItems: 'center',
-            height: 60,
-            gap: 20,
+            gap: 14,
+            padding: isMobile ? '0 18px' : '0 32px',
           }}
         >
-          {/* LOGO */}
-          <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 28, letterSpacing: '0.04em', flexShrink: 0 }}>
-            <span style={{ color: '#E60306' }}>1P</span>
-            <span style={{ color: '#FFFFFF', marginLeft: 6 }}>STUDIO</span>
+          {isMobile && (
+            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, letterSpacing: '0.04em', flexShrink: 0 }}>
+              <span style={{ color: '#E60306' }}>1P</span>
+              <span style={{ color: '#FFFFFF', marginLeft: 4 }}>STUDIO</span>
+            </div>
+          )}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, letterSpacing: '0.04em', color: '#FFF', lineHeight: 1 }}>
+              {meta.title.toUpperCase()}
+            </div>
+            {!isMobile && <div style={{ fontSize: 12, color: '#555', marginTop: 3 }}>{meta.subtitle}</div>}
           </div>
+        </header>
 
-          {/* TABS */}
-          <div style={{ display: 'flex', gap: 18, alignItems: 'center' }}>
-            <button style={tabStyle('upload')} onClick={() => setActiveTab('upload')}>UPLOAD</button>
-            <button style={tabStyle('library')} onClick={() => setActiveTab('library')}>
-              LIBRARY{library.length > 0 ? ` (${library.length})` : ''}
-            </button>
+        <main style={{ padding: isMobile ? '18px 16px 96px' : '28px 32px 64px' }}>
+          <div style={{ maxWidth: contentMax, margin: '0 auto' }}>
+            {renderView()}
           </div>
-        </div>
-      </header>
-
-      {/* MAIN CONTENT */}
-      <main style={{ maxWidth: 760, margin: '0 auto', padding: '32px 24px 64px' }}>
-        {activeTab === 'upload' ? (
-          <>
-            <DropZone onFilesSelected={handleFilesSelected} processing={processing} />
-
-            {isQueueActive && (
-              <div style={{ marginTop: 24 }}>
-                <QueueProgress queue={queue} />
-              </div>
-            )}
-
-            {results.length > 0 && (
-              <div style={{ marginTop: 32 }}>
-                <div style={{
-                  fontFamily: "'Bebas Neue', sans-serif",
-                  fontSize: 20,
-                  letterSpacing: '0.06em',
-                  color: '#555',
-                  marginBottom: 16,
-                }}>
-                  GENERATED CONTENT — {results.length} video{results.length !== 1 ? 's' : ''}
-                </div>
-                {results.map((result) => (
-                  <VideoCard
-                    key={result.id}
-                    result={result}
-                    onRegenerate={handleRegenerate}
-                    onRemove={handleRemove}
-                  />
-                ))}
-              </div>
-            )}
-          </>
-        ) : (
-          <LibraryView library={library} onDelete={handleLibraryDelete} />
-        )}
-      </main>
+        </main>
+      </div>
     </div>
   );
 }
