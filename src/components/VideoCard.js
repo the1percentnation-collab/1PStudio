@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import PublishPanel from './PublishPanel';
 
 const PILLAR_COLORS = {
   'Self-Sabotage & Limiting Beliefs': '#E60306',
@@ -248,7 +249,7 @@ function TranscriptPanel({ onRegenerate, isRegenerating }) {
 }
 
 export default function VideoCard({ result, onRegenerate, onRemove }) {
-  const { id, filename, frames, content, error } = result;
+  const { id, filename, frames, content, error, _file } = result;
   const [isRegenerating, setIsRegenerating] = useState(false);
   const pillarColor = content ? (PILLAR_COLORS[content.content_pillar] || '#888') : '#888';
 
@@ -408,6 +409,8 @@ export default function VideoCard({ result, onRegenerate, onRemove }) {
             Copy All
           </button>
         )}
+
+        {content && <PublishPanel videoFile={_file} content={content} />}
 
         <button
           onClick={() => handleRegenerate('')}

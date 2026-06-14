@@ -41,6 +41,45 @@ The app opens at `http://localhost:3000`.
 5. Use **Copy All**, **Regenerate**, or **Remove** per card
 6. Click **Export CSV** to download all results
 
+## Posting to Social Media (TikTok, IG Reels, YouTube Shorts, Facebook, X, LinkedIn)
+
+1P Studio can publish a video + its Claude-generated caption straight to your
+social accounts using [Ayrshare](https://www.ayrshare.com/) — one API that fans
+a single post out to every connected platform, so you don't have to build or get
+app-review for each network individually.
+
+### One-time setup
+
+1. **Create an Ayrshare account** at https://app.ayrshare.com/ and connect your
+   social accounts (TikTok, Instagram, YouTube, Facebook, X, LinkedIn) from its
+   dashboard. Instagram/Facebook require a Business/Creator account; TikTok and
+   YouTube use their own OAuth — all handled inside Ayrshare, not here.
+2. **Copy your Ayrshare API key** (Dashboard → API Key).
+3. **Give it to the backend.** The key lives only on the server (the
+   `publishPost` Cloud Function), never in the browser:
+   - **Local:** add `AYRSHARE_API_KEY=your-key` to `functions/.env`
+   - **CI/CD:** add a GitHub repo secret named `AYRSHARE_API_KEY`
+     (the deploy workflow already writes it into `functions/.env`)
+4. **Enable Anonymous sign-in** in the Firebase console
+   (Authentication → Sign-in method → Anonymous). Videos upload directly from
+   the browser to Firebase Storage, and the Storage rules require an
+   authenticated request — anonymous auth satisfies this with no login UI.
+
+### How to post
+
+1. Upload a video and let Claude generate the content
+2. On the generated card, click **Post to Social**
+3. Tap the platform chips you want, tweak the caption/title, and click **Post Now**
+4. The video uploads straight from your browser to Firebase Storage (with a live
+   progress bar), then Ayrshare pulls that URL and posts to every selected platform
+
+> **Notes:** The video uploads directly from the browser to Storage, so there is
+> **no app-imposed size cap** — long videos work, limited only by each platform's
+> own ceiling (e.g. YouTube Shorts ≤ 3 min, Instagram Reels ~15 min, X 2:20 on
+> the free tier). Instagram video posts publish as Reels and YouTube uses the
+> Title field. Cards loaded from the Library have no attached file and can't be
+> posted.
+
 ## Firebase Deployment
 
 ### Prerequisites

@@ -3,6 +3,9 @@
     "source": "functions",
         "runtime": "nodejs20"
   },
+  "storage": {
+    "rules": "storage.rules"
+  },
   "hosting": {
     "public": "build",
     "ignore": [
@@ -14,6 +17,11 @@
       {
         "source": "/api/analyze",
         "function": "analyzeVideo",
+        "region": "us-central1"
+      },
+      {
+        "source": "/api/publish",
+        "function": "publishPost",
         "region": "us-central1"
       },
       {

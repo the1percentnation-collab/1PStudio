@@ -123,3 +123,119 @@ export const analyzeVideo = onRequest(
     });
   }
 );
+
+// ---------------------------------------------------------------------------
+// Social publishing via Ayrshare
+//
+// Ayrshare is a single API that fans a post out to every connected social
+// account (TikTok, Instagram Reels, YouTube Shorts, Facebook, X, LinkedIn).
+// You connect each platform once inside the Ayrshare dashboard; this function
+// only needs the Ayrshare API key (set as the AYRSHARE_API_KEY env var / secret).
+//
+// Flow: the browser uploads the video DIRECTLY to Firebase Storage (no size
+// cap from this function) and POSTs the resulting download URL + caption +
+// selected platforms here as JSON. We hand that URL to Ayrshare's /post
+// endpoint, which pulls the video and posts it to every platform. No
+// per-platform OAuth or app review is needed on our side.
+// ---------------------------------------------------------------------------
+
+// Ayrshare's platform identifiers. Note: X is "twitter" in Ayrshare's API.
+const AYRSHARE_PLATFORMS: Record<string, string> = {
+  tiktok: "tiktok",
+  instagram: "instagram",
+  youtube: "youtube",
+  facebook: "facebook",
+  x: "twitter",
+  twitter: "twitter",
+  linkedin: "linkedin",
+};
+
+interface PublishBody {
+  mediaUrl?: string;
+  post?: string;
+  title?: string;
+  platforms?: string[];
+}
+
+export const publishPost = onRequest(
+  {
+    cors: true,
+    timeoutSeconds: 120,
+    memory: "256MiB",
+  },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+
+    const apiKey = process.env.AYRSHARE_API_KEY;
+    if (!apiKey) {
+      res.status(500).json({ error: "AYRSHARE_API_KEY is not configured on the server." });
+      return;
+    }
+
+    const { mediaUrl, post, title: rawTitle, platforms: rawPlatforms } = (req.body ?? {}) as PublishBody;
+
+    const requested = (rawPlatforms ?? []).map((p) => p.toLowerCase());
+    const platforms = Array.from(
+      new Set(requested.map((p) => AYRSHARE_PLATFORMS[p]).filter(Boolean))
+    );
+
+    if (platforms.length === 0) {
+      res.status(400).json({ error: "Select at least one supported platform to post to." });
+      return;
+    }
+    if (!mediaUrl || !/^https?:\/\//.test(mediaUrl)) {
+      res.status(400).json({ error: "A valid video URL is required (upload the video first)." });
+      return;
+    }
+
+    const postText = (post ?? "").trim();
+    if (!postText) {
+      res.status(400).json({ error: "Caption text is required to publish." });
+      return;
+    }
+
+    // Build the Ayrshare request, including platform-specific options.
+    const title = (rawTitle ?? postText).slice(0, 99);
+    const body: Record<string, unknown> = {
+      post: postText,
+      platforms,
+      mediaUrls: [mediaUrl],
+      isVideo: true,
+    };
+
+    if (platforms.includes("youtube")) {
+      body.youTubeOptions = { title, visibility: "public" };
+    }
+    if (platforms.includes("instagram")) {
+      // Video posts to Instagram publish as Reels.
+      body.instagramOptions = { reels: true };
+    }
+
+    // Fan the post out.
+    try {
+      const ayrRes = await fetch("https://api.ayrshare.com/api/post", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      const result = await ayrRes.json().catch(() => ({}));
+      if (!ayrRes.ok) {
+        const message =
+          (result as { message?: string }).message ?? `Ayrshare error ${ayrRes.status}`;
+        res.status(ayrRes.status).json({ error: message, details: result });
+        return;
+      }
+
+      res.json({ status: "ok", mediaUrl, ayrshare: result });
+    } catch (e) {
+      res.status(502).json({ error: `Failed to reach Ayrshare: ${e instanceof Error ? e.message : "unknown error"}` });
+    }
+  }
+);
