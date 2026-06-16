@@ -4,7 +4,7 @@ export default function DropZone({ onFilesSelected, processing }) {
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef(null);
 
-  const icon = processing ? '⚙️' : dragging ? '🎯' : '🎬';
+  const icon = dragging ? '🎯' : '🎬';
 
   const containerStyle = {
     border: `2px dashed ${dragging ? '#E60306' : '#1A1A1A'}`,
@@ -70,6 +70,29 @@ export default function DropZone({ onFilesSelected, processing }) {
     e.target.value = '';
   };
 
+  if (processing) {
+    return (
+      <div style={{ ...containerStyle, cursor: 'default', borderColor: '#E60306', borderStyle: 'solid', background: 'rgba(230,3,6,0.04)' }}>
+        <div
+          style={{
+            width: 52,
+            height: 52,
+            margin: '0 auto 18px',
+            border: '4px solid #1A1A1A',
+            borderTopColor: '#E60306',
+            borderRadius: '50%',
+            animation: 'spin 0.8s linear infinite',
+          }}
+        />
+        <div style={headingStyle}>LOADING YOUR VIDEO…</div>
+        <div style={subStyle}>
+          Reading the video and generating your content. This can take a moment for longer clips —
+          please keep this tab open.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       style={containerStyle}
@@ -79,20 +102,14 @@ export default function DropZone({ onFilesSelected, processing }) {
       onClick={handleClick}
     >
       <span style={iconStyle}>{icon}</span>
-      <div style={headingStyle}>
-        {processing ? 'PROCESSING...' : 'DROP VIDEOS HERE'}
-      </div>
+      <div style={headingStyle}>DROP VIDEOS HERE</div>
       <div style={subStyle}>
-        {processing
-          ? 'Please wait while your content is being generated'
-          : 'Drag & drop up to 20 video files, or click to browse'}
+        Drag &amp; drop up to 20 video files, or click to browse
       </div>
-      {!processing && (
-        <div style={{ fontSize: 12, color: '#555', marginTop: 8, lineHeight: 1.5 }}>
-          Tip: long or 4K iPhone videos are large and upload slowly on cellular.
-          For speed, use Wi-Fi and pick shorter clips that are already downloaded from iCloud.
-        </div>
-      )}
+      <div style={{ fontSize: 12, color: '#555', marginTop: 8, lineHeight: 1.5 }}>
+        Tip: long or 4K iPhone videos are large and load slowly, especially from iCloud.
+        For speed, use Wi-Fi and pick shorter clips already downloaded to your device.
+      </div>
       <input
         ref={inputRef}
         type="file"
