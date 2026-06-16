@@ -2,6 +2,12 @@ import React, { useState } from 'react';
 import DropZone from './DropZone';
 import { CAPTION_STYLES, renderCaptions } from '../services/captionService';
 
+function formatMB(bytes) {
+  if (!bytes) return '';
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${Math.round(mb)} MB`;
+}
+
 export default function CaptionsView() {
   const [style, setStyle] = useState('bold');
   const [phase, setPhase] = useState('idle'); // idle | uploading | rendering | done | error
@@ -9,13 +15,16 @@ export default function CaptionsView() {
   const [result, setResult] = useState(null); // { videoUrl }
   const [error, setError] = useState(null);
   const [filename, setFilename] = useState('');
+  const [fileSize, setFileSize] = useState(0);
 
   const busy = phase === 'uploading' || phase === 'rendering';
+  const isLarge = fileSize > 250 * 1024 * 1024;
 
   const handleFile = async (files) => {
     const file = files && files[0];
     if (!file) return;
     setFilename(file.name);
+    setFileSize(file.size);
     setResult(null);
     setError(null);
     setProgress(0);
@@ -39,6 +48,7 @@ export default function CaptionsView() {
     setError(null);
     setProgress(0);
     setFilename('');
+    setFileSize(0);
   };
 
   return (
@@ -93,7 +103,10 @@ export default function CaptionsView() {
 
       {busy && (
         <div style={{ background: '#111', border: '1px solid #1A1A1A', borderRadius: 14, padding: 22 }}>
-          <div style={{ fontSize: 13, color: '#CCC', marginBottom: 12 }}>{filename}</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 12 }}>
+            <span style={{ fontSize: 13, color: '#CCC', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{filename}</span>
+            {fileSize > 0 && <span style={{ fontSize: 12, color: '#666', flexShrink: 0 }}>{formatMB(fileSize)}</span>}
+          </div>
           <div style={{ height: 6, background: '#1A1A1A', borderRadius: 3, overflow: 'hidden', marginBottom: 8 }}>
             <div style={{
               width: phase === 'uploading' ? `${Math.round(progress * 100)}%` : '100%',
@@ -104,7 +117,7 @@ export default function CaptionsView() {
           </div>
           <div style={{ fontSize: 12, color: '#888' }}>
             {phase === 'uploading'
-              ? `Uploading video… ${Math.round(progress * 100)}%`
+              ? `Uploading video… ${Math.round(progress * 100)}%${isLarge ? ' — large file, this can take a while on mobile' : ''}`
               : 'Transcribing audio & burning in captions… this can take a few minutes for longer videos.'}
           </div>
         </div>

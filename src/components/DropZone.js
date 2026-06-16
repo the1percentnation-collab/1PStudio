@@ -87,6 +87,12 @@ export default function DropZone({ onFilesSelected, processing }) {
           ? 'Please wait while your content is being generated'
           : 'Drag & drop up to 20 video files, or click to browse'}
       </div>
+      {!processing && (
+        <div style={{ fontSize: 12, color: '#555', marginTop: 8, lineHeight: 1.5 }}>
+          Tip: long or 4K iPhone videos are large and upload slowly on cellular.
+          For speed, use Wi-Fi and pick shorter clips that are already downloaded from iCloud.
+        </div>
+      )}
       <input
         ref={inputRef}
         type="file"
