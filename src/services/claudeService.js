@@ -1,3 +1,18 @@
+import { uploadVideo } from './socialService';
+
+// Transcribes an uploaded video via the Deepgram-backed function. Returns the
+// transcript text, or '' if transcription isn't configured/available.
+async function transcribeVideo(mediaUrl) {
+  const res = await fetch('/api/transcribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mediaUrl }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Transcription failed (${res.status})`);
+  return (data.transcript || '').trim();
+}
+
 function extractFrameAt(video, pct) {
   return new Promise((resolve) => {
     const targetTime = video.duration * pct;
@@ -60,12 +75,28 @@ export async function generateTikTokContent(videoFile, onProgress, transcript = 
     /* non-fatal */
   }
 
+  // If no transcript was supplied, auto-transcribe the audio so Claude grades
+  // the actual spoken content (the real hook/message), not just still frames.
+  // Best-effort: any failure falls back to frame-only analysis.
+  let finalTranscript = (transcript || '').trim();
+  if (!finalTranscript) {
+    try {
+      const mediaUrl = await uploadVideo(videoFile, (p) =>
+        onProgress(`Uploading for analysis… ${Math.round(p * 100)}%`)
+      );
+      onProgress('Transcribing audio…');
+      finalTranscript = await transcribeVideo(mediaUrl);
+    } catch {
+      /* no transcript available — fall back to frames only */
+    }
+  }
+
   onProgress('Analyzing with Claude...');
 
   const response = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ frames, transcript, filename: videoFile.name }),
+    body: JSON.stringify({ frames, transcript: finalTranscript, filename: videoFile.name }),
   });
 
   if (!response.ok) {

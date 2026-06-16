@@ -35,6 +35,11 @@
         "region": "us-central1"
       },
       {
+        "source": "/api/transcribe",
+        "function": "transcribeAudio",
+        "region": "us-central1"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

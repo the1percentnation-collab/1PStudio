@@ -537,3 +537,58 @@ export const captionVideo = onRequest(
     }
   }
 );
+
+// ---------------------------------------------------------------------------
+// Transcription — returns the spoken text of a video (Deepgram). Used by the
+// Composer flow so Claude grades the actual content, not just still frames.
+// Best-effort: returns an empty transcript (not an error) when unconfigured,
+// so generation can gracefully fall back to frame-only analysis.
+// ---------------------------------------------------------------------------
+export const transcribeAudio = onRequest(
+  {
+    cors: true,
+    timeoutSeconds: 120,
+    memory: "256MiB",
+  },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+
+    const deepgramKey = process.env.DEEPGRAM_API_KEY;
+    if (!deepgramKey) {
+      res.status(200).json({ transcript: "", configured: false });
+      return;
+    }
+
+    const { mediaUrl } = (req.body ?? {}) as { mediaUrl?: string };
+    if (!mediaUrl || !/^https?:\/\//.test(mediaUrl)) {
+      res.status(400).json({ error: "A valid video URL is required." });
+      return;
+    }
+
+    try {
+      const dgRes = await fetch(
+        "https://api.deepgram.com/v1/listen?model=nova-2&smart_format=true&punctuate=true",
+        {
+          method: "POST",
+          headers: { Authorization: `Token ${deepgramKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ url: mediaUrl }),
+        }
+      );
+      const dg = (await dgRes.json().catch(() => ({}))) as {
+        results?: { channels?: { alternatives?: { transcript?: string }[] }[] };
+        err_msg?: string;
+      };
+      if (!dgRes.ok) {
+        res.status(502).json({ error: `Transcription failed: ${dg.err_msg ?? dgRes.status}` });
+        return;
+      }
+      const transcript = dg.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? "";
+      res.json({ transcript, configured: true });
+    } catch (e) {
+      res.status(502).json({ error: e instanceof Error ? e.message : "Transcription failed." });
+    }
+  }
+);
