@@ -239,9 +239,19 @@ export const publishPost = onRequest(
 
       const result = await ayrRes.json().catch(() => ({}));
       if (!ayrRes.ok) {
-        const message =
-          (result as { message?: string }).message ?? `Ayrshare error ${ayrRes.status}`;
-        res.status(ayrRes.status).json({ error: message, details: result });
+        // Surface Ayrshare's real reason — it may be a top-level message, a
+        // per-platform errors array, or a bare status. Don't hide it behind 403.
+        const r = result as {
+          message?: string;
+          errors?: { message?: string; platform?: string }[];
+          posts?: { status?: string; errors?: { message?: string }[]; platform?: string }[];
+        };
+        const detail =
+          r.message ||
+          r.errors?.map((e) => `${e.platform ? e.platform + ": " : ""}${e.message}`).join("; ") ||
+          r.posts?.flatMap((p) => (p.errors ?? []).map((e) => `${p.platform ? p.platform + ": " : ""}${e.message}`)).join("; ") ||
+          `Ayrshare error ${ayrRes.status}`;
+        res.status(ayrRes.status).json({ error: detail, details: result });
         return;
       }
 
