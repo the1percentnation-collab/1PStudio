@@ -74,6 +74,78 @@ function ContentField({ label, value, mono }) {
   );
 }
 
+function VideoPreview({ url, filename }) {
+  if (!url) return null;
+  return (
+    <div style={{ padding: '0 16px 14px' }}>
+      <video
+        src={url}
+        controls
+        playsInline
+        preload="metadata"
+        aria-label={`Preview of ${filename}`}
+        style={{
+          width: '100%',
+          maxHeight: 420,
+          borderRadius: 10,
+          background: '#000',
+          display: 'block',
+        }}
+      />
+    </div>
+  );
+}
+
+function TranscriptView({ transcript }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!transcript) return null;
+
+  const isLong = transcript.length > 220;
+  const shown = expanded || !isLong ? transcript : `${transcript.slice(0, 220).trimEnd()}…`;
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', color: '#666', textTransform: 'uppercase' }}>
+          TRANSCRIPT
+        </span>
+        <CopyButton text={transcript} small />
+      </div>
+      <div
+        style={{
+          background: '#0A0A0A',
+          border: '1px solid #1A1A1A',
+          borderRadius: 8,
+          padding: '10px 12px',
+          fontSize: 12,
+          color: '#999',
+          lineHeight: 1.6,
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      >
+        {shown}
+        {isLong && (
+          <button
+            onClick={() => setExpanded((e) => !e)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#E60306',
+              fontSize: 12,
+              cursor: 'pointer',
+              padding: 0,
+              marginLeft: 6,
+            }}
+          >
+            {expanded ? 'Show less' : 'Show more'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function FrameStrip({ frames }) {
   const available = [
     { label: 'HOOK', data: frames?.hookFrame },
@@ -163,14 +235,14 @@ function TitleOptions({ titles }) {
   );
 }
 
-function TranscriptPanel({ onRegenerate, isRegenerating }) {
+function TranscriptPanel({ onRegenerate, isRegenerating, initialTranscript }) {
   const [open, setOpen] = useState(false);
   const [transcript, setTranscript] = useState('');
 
   if (!open) {
     return (
       <button
-        onClick={() => setOpen(true)}
+        onClick={() => { setTranscript(initialTranscript || ''); setOpen(true); }}
         style={{
           background: 'transparent',
           border: '1px dashed #333',
@@ -184,7 +256,7 @@ function TranscriptPanel({ onRegenerate, isRegenerating }) {
         onMouseEnter={(e) => { e.currentTarget.style.color = '#AAA'; e.currentTarget.style.borderColor = '#555'; }}
         onMouseLeave={(e) => { e.currentTarget.style.color = '#666'; e.currentTarget.style.borderColor = '#333'; }}
       >
-        + Add Transcript
+        {initialTranscript ? 'Edit Transcript' : '+ Add Transcript'}
       </button>
     );
   }
@@ -248,8 +320,8 @@ function TranscriptPanel({ onRegenerate, isRegenerating }) {
   );
 }
 
-export default function VideoCard({ result, onRegenerate, onRemove, onPublished }) {
-  const { id, filename, frames, content, error, _file } = result;
+export default function VideoCard({ result, onRegenerate, onRemove, onPublished, onEdit }) {
+  const { id, filename, frames, content, error, _file, videoUrl, transcript } = result;
   const [isRegenerating, setIsRegenerating] = useState(false);
   const pillarColor = content ? (PILLAR_COLORS[content.content_pillar] || '#888') : '#888';
 
@@ -317,6 +389,9 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished 
         </div>
       </div>
 
+      {/* VIDEO PREVIEW — playable copy of the uploaded file */}
+      <VideoPreview url={videoUrl} filename={filename} />
+
       {/* FRAME STRIP — hook screenshot + mid + end, all downloadable */}
       <FrameStrip frames={frames} />
 
@@ -355,6 +430,8 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished 
           {content.video_description && (
             <ContentField label="VIDEO DESCRIPTION" value={content.video_description} />
           )}
+
+          <TranscriptView transcript={transcript} />
 
           <div style={{ borderTop: '1px solid #1A1A1A', margin: '14px 0' }} />
 
@@ -420,6 +497,27 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished 
           />
         )}
 
+        {videoUrl && onEdit && (
+          <button
+            onClick={() => onEdit(id)}
+            style={{
+              background: '#1A1A1A',
+              color: '#FFF',
+              fontSize: 13,
+              fontWeight: 600,
+              padding: '8px 16px',
+              borderRadius: 8,
+              border: '1px solid #333',
+              cursor: 'pointer',
+              transition: 'border-color 0.2s',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#E60306')}
+            onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#333')}
+          >
+            ✂️ Edit Video
+          </button>
+        )}
+
         <button
           onClick={() => handleRegenerate('')}
           disabled={isRegenerating}
@@ -441,7 +539,7 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished 
           Regenerate
         </button>
 
-        <TranscriptPanel onRegenerate={handleRegenerate} isRegenerating={isRegenerating} />
+        <TranscriptPanel onRegenerate={handleRegenerate} isRegenerating={isRegenerating} initialTranscript={transcript} />
 
         <button
           onClick={() => onRemove(id)}

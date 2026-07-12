@@ -83,7 +83,7 @@ function TitleRow({ title, index }) {
 
 function LibraryCard({ item, onDelete }) {
   const [expanded, setExpanded] = useState(false);
-  const { filename, frames, content, error, dateAdded } = item;
+  const { filename, frames, content, transcript, error, dateAdded } = item;
   const pillarColor = content ? (PILLAR_COLORS[content.content_pillar] || '#888') : '#888';
 
   return (
@@ -179,6 +179,7 @@ function LibraryCard({ item, onDelete }) {
                 </div>
               )}
               {content.video_description && <Field label="VIDEO DESCRIPTION" value={content.video_description} />}
+              {transcript && <Field label="TRANSCRIPT" value={transcript} muted />}
 
               <div style={{ borderTop: '1px solid #1A1A1A', margin: '12px 0' }} />
 

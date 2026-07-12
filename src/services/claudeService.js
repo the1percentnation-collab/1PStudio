@@ -1,7 +1,9 @@
 import { uploadVideo } from './socialService';
 
-// Transcribes an uploaded video via the Deepgram-backed function. Returns the
-// transcript text, or '' if transcription isn't configured/available.
+// Transcribes an uploaded video via the Deepgram-backed function. Returns
+// { text, words } where words is [{ w, s, e }] (word, start/end seconds) —
+// empty when transcription isn't configured/available. The word timings
+// drive the synced-caption editor.
 async function transcribeVideo(mediaUrl) {
   const res = await fetch('/api/transcribe', {
     method: 'POST',
@@ -10,7 +12,10 @@ async function transcribeVideo(mediaUrl) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || `Transcription failed (${res.status})`);
-  return (data.transcript || '').trim();
+  return {
+    text: (data.transcript || '').trim(),
+    words: Array.isArray(data.words) ? data.words : [],
+  };
 }
 
 function extractFrameAt(video, pct) {
@@ -79,13 +84,16 @@ export async function generateTikTokContent(videoFile, onProgress, transcript = 
   // the actual spoken content (the real hook/message), not just still frames.
   // Best-effort: any failure falls back to frame-only analysis.
   let finalTranscript = (transcript || '').trim();
+  let words = [];
   if (!finalTranscript) {
     try {
       const mediaUrl = await uploadVideo(videoFile, (p) =>
         onProgress(`Uploading for analysis… ${Math.round(p * 100)}%`)
       );
       onProgress('Transcribing audio…');
-      finalTranscript = await transcribeVideo(mediaUrl);
+      const t = await transcribeVideo(mediaUrl);
+      finalTranscript = t.text;
+      words = t.words;
     } catch {
       /* no transcript available — fall back to frames only */
     }
@@ -105,5 +113,6 @@ export async function generateTikTokContent(videoFile, onProgress, transcript = 
   }
 
   onProgress('Parsing response...');
-  return await response.json();
+  const content = await response.json();
+  return { content, frames, transcript: finalTranscript, words };
 }
