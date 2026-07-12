@@ -10,6 +10,7 @@ import VideoCard from './components/VideoCard';
 import QueueProgress from './components/QueueProgress';
 import LibraryView from './components/LibraryView';
 import { generateTikTokContent } from './services/claudeService';
+import VideoEditorModal from './components/editor/VideoEditorModal';
 
 const LIBRARY_KEY = '1p-studio-library';
 const POSTS_KEY = '1p-studio-posts';
@@ -68,6 +69,7 @@ export default function App() {
       filename: entry.filename,
       frames: { hookFrame: entry.frames?.hookFrame ?? null },
       content: entry.content,
+      transcript: entry.transcript ? entry.transcript.slice(0, 5000) : '',
       error: entry.error,
       dateAdded: Date.now(),
     };
@@ -87,22 +89,46 @@ export default function App() {
   }, []);
 
   const processFile = useCallback(
-    async (queueItem, transcript = '') => {
+    async (queueItem, transcript = '', words = null) => {
       const { id, file } = queueItem;
       updateQueueItem(id, { status: 'processing', message: 'Starting...' });
 
       try {
-        const content = await generateTikTokContent(file, (msg) => {
+        const result = await generateTikTokContent(file, (msg) => {
           updateQueueItem(id, { message: msg });
         }, transcript);
 
         updateQueueItem(id, { status: 'done', message: '' });
-        const entry = { id, filename: file.name, _file: file, frames: {}, content, error: null };
+        const entry = {
+          id,
+          filename: file.name,
+          _file: file,
+          videoUrl: URL.createObjectURL(file),
+          frames: result.frames || {},
+          content: result.content,
+          transcript: result.transcript || transcript || '',
+          // word timings power the editor's synced captions; when a manual
+          // transcript skips re-transcription, reuse the original timings
+          words: (result.words?.length ? result.words : words) || [],
+          overlaySpec: null,
+          error: null,
+        };
         setResults((prev) => [entry, ...prev]);
         addToLibrary(entry);
       } catch (err) {
         updateQueueItem(id, { status: 'error', message: 'Failed' });
-        const entry = { id, filename: file.name, _file: file, frames: {}, content: null, error: err.message };
+        const entry = {
+          id,
+          filename: file.name,
+          _file: file,
+          videoUrl: URL.createObjectURL(file),
+          frames: {},
+          content: null,
+          transcript: transcript || '',
+          words: words || [],
+          overlaySpec: null,
+          error: err.message,
+        };
         setResults((prev) => [entry, ...prev]);
         addToLibrary(entry);
       }
@@ -135,6 +161,7 @@ export default function App() {
       const result = results.find((r) => r.id === id);
       if (!result || !result._file) return;
 
+      if (result.videoUrl) URL.revokeObjectURL(result.videoUrl);
       setResults((prev) => prev.filter((r) => r.id !== id));
 
       const newId = uid();
@@ -142,14 +169,30 @@ export default function App() {
 
       setQueue((prev) => [...prev, queueItem]);
       setProcessing(true);
-      await processFile(queueItem, transcript || '');
+      // fall back to the stored transcript/words so regenerating skips re-upload
+      // and the editor's captions keep working (audio unchanged = timings valid)
+      await processFile(queueItem, transcript || result.transcript || '', result.words || []);
       setProcessing(false);
     },
     [results, processFile]
   );
 
+  const [editingId, setEditingId] = useState(null);
+  const editingResult = results.find((r) => r.id === editingId) || null;
+
+  const handleEdit = useCallback((id) => setEditingId(id), []);
+
+  const handleSaveSpec = useCallback((id, spec) => {
+    setResults((prev) => prev.map((r) => (r.id === id ? { ...r, overlaySpec: spec } : r)));
+  }, []);
+
   const handleRemove = useCallback((id) => {
-    setResults((prev) => prev.filter((r) => r.id !== id));
+    setResults((prev) => {
+      const target = prev.find((r) => r.id === id);
+      if (target?.videoUrl) URL.revokeObjectURL(target.videoUrl);
+      return prev.filter((r) => r.id !== id);
+    });
+    setEditingId((cur) => (cur === id ? null : cur));
   }, []);
 
   const isQueueActive = queue.some((i) => i.status === 'waiting' || i.status === 'processing');
@@ -198,6 +241,7 @@ export default function App() {
                 onRegenerate={handleRegenerate}
                 onRemove={handleRemove}
                 onPublished={handlePublished}
+                onEdit={handleEdit}
               />
             ))}
           </div>
@@ -247,6 +291,15 @@ export default function App() {
           </div>
         </main>
       </div>
+
+      {/* full-screen editor — zIndex above Sidebar (200) and top bar (100) */}
+      {editingResult && (
+        <VideoEditorModal
+          result={editingResult}
+          onClose={() => setEditingId(null)}
+          onSaveSpec={handleSaveSpec}
+        />
+      )}
     </div>
   );
 }

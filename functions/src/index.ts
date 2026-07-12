@@ -568,7 +568,7 @@ export const transcribeAudio = onRequest(
 
     const deepgramKey = process.env.DEEPGRAM_API_KEY;
     if (!deepgramKey) {
-      res.status(200).json({ transcript: "", configured: false });
+      res.status(200).json({ transcript: "", words: [], configured: false });
       return;
     }
 
@@ -588,15 +588,20 @@ export const transcribeAudio = onRequest(
         }
       );
       const dg = (await dgRes.json().catch(() => ({}))) as {
-        results?: { channels?: { alternatives?: { transcript?: string }[] }[] };
+        results?: { channels?: { alternatives?: { transcript?: string; words?: DGWord[] }[] }[] };
         err_msg?: string;
       };
       if (!dgRes.ok) {
         res.status(502).json({ error: `Transcription failed: ${dg.err_msg ?? dgRes.status}` });
         return;
       }
-      const transcript = dg.results?.channels?.[0]?.alternatives?.[0]?.transcript ?? "";
-      res.json({ transcript, configured: true });
+      const alt = dg.results?.channels?.[0]?.alternatives?.[0];
+      const transcript = alt?.transcript ?? "";
+      // word-level timings power the synced-caption editor in the browser
+      const words = (alt?.words ?? [])
+        .filter((w) => typeof w.start === "number" && typeof w.end === "number")
+        .map((w) => ({ w: w.punctuated_word ?? w.word, s: w.start, e: w.end }));
+      res.json({ transcript, words, configured: true });
     } catch (e) {
       res.status(502).json({ error: e instanceof Error ? e.message : "Transcription failed." });
     }
