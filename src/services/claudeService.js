@@ -99,7 +99,7 @@ export async function generateTikTokContent(videoFile, onProgress, transcript = 
     }
   }
 
-  onProgress('Analyzing with Claude...');
+  onProgress('Analyzing with 1P Studio…');
 
   const response = await fetch('/api/analyze', {
     method: 'POST',
