@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import PublishPanel from './PublishPanel';
 
 const PILLAR_COLORS = {
   'Self-Sabotage & Limiting Beliefs': '#E60306',
@@ -81,9 +82,9 @@ function TitleRow({ title, index }) {
   );
 }
 
-function LibraryCard({ item, onDelete }) {
+function LibraryCard({ item, onDelete, onShared, onPublished }) {
   const [expanded, setExpanded] = useState(false);
-  const { filename, frames, content, transcript, error, dateAdded } = item;
+  const { filename, frames, content, transcript, error, dateAdded, mediaUrl, sharedPlatforms } = item;
   const pillarColor = content ? (PILLAR_COLORS[content.content_pillar] || '#888') : '#888';
 
   return (
@@ -205,6 +206,29 @@ function LibraryCard({ item, onDelete }) {
             <div style={{ fontSize: 12, color: '#FF4444', marginBottom: 12 }}>Error: {error}</div>
           ) : null}
 
+          {content && (
+            <div style={{ borderTop: '1px solid #1A1A1A', paddingTop: 12, marginBottom: 12 }}>
+              <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', color: '#555', textTransform: 'uppercase', marginBottom: 8 }}>
+                Post / Share
+              </div>
+              {mediaUrl ? (
+                <PublishPanel
+                  mediaUrl={mediaUrl}
+                  content={content}
+                  filename={filename}
+                  sharedPlatforms={sharedPlatforms || []}
+                  onShared={(platforms) => onShared?.(item.id, platforms)}
+                  onPublished={onPublished}
+                />
+              ) : (
+                <div style={{ fontSize: 11, color: '#8a6d1a', background: '#FFC10711', border: '1px solid #FFC10733', borderRadius: 8, padding: '8px 10px', lineHeight: 1.5 }}>
+                  This item has no hosted video copy yet, so it can’t be posted from the Library.
+                  Videos generated from now on will be postable here; older ones need to be re-run through the Composer.
+                </div>
+              )}
+            </div>
+          )}
+
           <button
             onClick={() => onDelete(item.id)}
             style={{
@@ -228,7 +252,7 @@ function LibraryCard({ item, onDelete }) {
   );
 }
 
-export default function LibraryView({ library, onDelete }) {
+export default function LibraryView({ library, onDelete, onShared, onPublished }) {
   if (library.length === 0) {
     return (
       <div style={{ textAlign: 'center', padding: '80px 24px', color: '#333' }}>
@@ -260,7 +284,7 @@ export default function LibraryView({ library, onDelete }) {
         VIDEO LIBRARY — {library.length} video{library.length !== 1 ? 's' : ''}
       </div>
       {library.map((item) => (
-        <LibraryCard key={item.id} item={item} onDelete={onDelete} />
+        <LibraryCard key={item.id} item={item} onDelete={onDelete} onShared={onShared} onPublished={onPublished} />
       ))}
     </div>
   );

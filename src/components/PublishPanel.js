@@ -4,14 +4,20 @@ import { SOCIAL_PLATFORMS, publishToSocial, publishByUrl } from '../services/soc
 // Posts a video to social platforms. Pass EITHER a `videoFile` (uploaded to
 // Storage first, with a progress bar) OR a `mediaUrl` for a clip that's already
 // hosted (e.g. a Higgsfield-generated / imported video) — that path skips upload.
-export default function PublishPanel({ videoFile, mediaUrl, content, onPublished, filename, thumbnail, autoOpen }) {
+export default function PublishPanel({ videoFile, mediaUrl, content, onPublished, onShared, sharedPlatforms, filename, thumbnail, autoOpen }) {
+  // Library mode: sharedPlatforms is an array (even empty) — we mark already-
+  // shared platforms and pre-select the ones this video hasn't gone to yet.
+  const libraryMode = Array.isArray(sharedPlatforms);
+  const unshared = () =>
+    libraryMode ? SOCIAL_PLATFORMS.filter((p) => !sharedPlatforms.includes(p.id)).map((p) => p.id) : [];
+
   const [open, setOpen] = useState(false);
 
   // open automatically when the editor sends us here via "Continue to Post"
   useEffect(() => {
     if (autoOpen) setOpen(true);
   }, [autoOpen]);
-  const [selected, setSelected] = useState([]);
+  const [selected, setSelected] = useState(unshared);
   const [scheduleOn, setScheduleOn] = useState(false);
   const [scheduleAt, setScheduleAt] = useState('');
   const [caption, setCaption] = useState(() => {
@@ -71,6 +77,7 @@ export default function PublishPanel({ videoFile, mediaUrl, content, onPublished
           status: isScheduled ? 'scheduled' : 'published',
         });
       }
+      if (onShared) onShared(selected);
     } catch (err) {
       setStatus({ type: 'error', message: err.message });
     } finally {
@@ -138,7 +145,7 @@ export default function PublishPanel({ videoFile, mediaUrl, content, onPublished
             Done
           </button>
           <button
-            onClick={() => { setStatus(null); setSelected([]); }}
+            onClick={() => { setStatus(null); setSelected(unshared()); }}
             style={{ background: 'transparent', border: '1px solid #2A6B57', color: '#9FE7CF', fontSize: 13, padding: '8px 16px', borderRadius: 8, cursor: 'pointer' }}
           >
             Post another
@@ -160,22 +167,34 @@ export default function PublishPanel({ videoFile, mediaUrl, content, onPublished
         boxSizing: 'border-box',
       }}
     >
-      <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', color: '#666', textTransform: 'uppercase', marginBottom: 10 }}>
-        Publish to platforms
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', color: '#666', textTransform: 'uppercase' }}>
+          {libraryMode ? 'Share to platforms' : 'Publish to platforms'}
+        </span>
+        {libraryMode && sharedPlatforms.length > 0 && (
+          <button
+            onClick={() => setSelected([...sharedPlatforms])}
+            style={{ background: 'transparent', border: '1px solid #333', color: '#888', fontSize: 11, padding: '3px 10px', borderRadius: 6, cursor: 'pointer' }}
+          >
+            ↻ Reshare posted
+          </button>
+        )}
       </div>
 
       {/* PLATFORM CHIPS */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
         {SOCIAL_PLATFORMS.map(({ id, label }) => {
           const active = selected.includes(id);
+          const shared = libraryMode && sharedPlatforms.includes(id);
           return (
             <button
               key={id}
               onClick={() => togglePlatform(id)}
+              title={shared ? 'Already shared — select to reshare' : ''}
               style={{
                 background: active ? '#00C48C22' : '#111',
-                border: `1px solid ${active ? '#00C48C' : '#333'}`,
-                color: active ? '#00C48C' : '#999',
+                border: `1px solid ${active ? '#00C48C' : shared ? '#2A6B57' : '#333'}`,
+                color: active ? '#00C48C' : shared ? '#6FBFA3' : '#999',
                 fontSize: 12,
                 fontWeight: 600,
                 padding: '6px 12px',
@@ -184,11 +203,18 @@ export default function PublishPanel({ videoFile, mediaUrl, content, onPublished
                 transition: 'all 0.15s',
               }}
             >
-              {label}
+              {shared ? '✓ ' : ''}{label}
             </button>
           );
         })}
       </div>
+      {libraryMode && (
+        <div style={{ fontSize: 11, color: '#666', marginBottom: 12, lineHeight: 1.45 }}>
+          {sharedPlatforms.length > 0
+            ? `Already shared to ${sharedPlatforms.length} platform${sharedPlatforms.length !== 1 ? 's' : ''} (✓). New platforms are pre-selected.`
+            : 'Not shared anywhere yet — all platforms are pre-selected.'}
+        </div>
+      )}
 
       {/* TITLE (used for YouTube) */}
       <label style={{ display: 'block', fontSize: 10, color: '#666', letterSpacing: '0.1em', marginBottom: 4, textTransform: 'uppercase' }}>

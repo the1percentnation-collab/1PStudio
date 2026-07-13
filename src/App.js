@@ -75,6 +75,10 @@ export default function App() {
       // keep word timings so captions survive reopening (a few KB per clip)
       words: entry.words || [],
       captionsStatus: entry.captionsStatus || null,
+      // durable hosted video URL + which platforms it's already been shared to,
+      // so the Library can post/reshare it later
+      mediaUrl: entry.mediaUrl || null,
+      sharedPlatforms: entry.sharedPlatforms || [],
       error: entry.error,
       dateAdded: Date.now(),
     };
@@ -83,6 +87,15 @@ export default function App() {
 
   const handleLibraryDelete = useCallback((id) => {
     setLibrary((prev) => prev.filter((i) => i.id !== id));
+  }, []);
+
+  // record which platforms a library item has been shared to (merge, dedupe)
+  const handleLibraryShared = useCallback((id, platforms) => {
+    setLibrary((prev) => prev.map((i) =>
+      i.id === id
+        ? { ...i, sharedPlatforms: Array.from(new Set([...(i.sharedPlatforms || []), ...platforms])) }
+        : i
+    ));
   }, []);
 
   const handlePublished = useCallback((record) => {
@@ -116,6 +129,7 @@ export default function App() {
           // transcript skips re-transcription, reuse the original timings
           words: (result.words?.length ? result.words : words) || [],
           captionsStatus: result.captionsStatus || null,
+          mediaUrl: result.mediaUrl || null,
           overlaySpec: null,
           error: null,
         };
@@ -239,7 +253,14 @@ export default function App() {
       return <Analytics library={library} posts={posts} />;
     }
     if (view === 'library') {
-      return <LibraryView library={library} onDelete={handleLibraryDelete} />;
+      return (
+        <LibraryView
+          library={library}
+          onDelete={handleLibraryDelete}
+          onShared={handleLibraryShared}
+          onPublished={handlePublished}
+        />
+      );
     }
     if (view === 'accounts') {
       return <AccountsView />;

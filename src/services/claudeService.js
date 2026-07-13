@@ -109,16 +109,18 @@ export async function generateTikTokContent(videoFile, onProgress, transcript = 
   // Best-effort: any failure falls back to frame-only analysis.
   let finalTranscript = (transcript || '').trim();
   let words = [];
+  // durable Storage URL of the uploaded video — lets the Library re-post later
+  let uploadedUrl = null;
   // 'skipped' when a manual transcript was supplied; otherwise reflects the
   // transcription attempt so the editor can explain missing captions.
   let captionsStatus = finalTranscript ? 'skipped' : 'ok';
   if (!finalTranscript) {
     try {
-      const mediaUrl = await uploadVideo(videoFile, (p) =>
+      uploadedUrl = await uploadVideo(videoFile, (p) =>
         onProgress(`Uploading for analysis… ${Math.round(p * 100)}%`)
       );
       onProgress('Transcribing audio…');
-      const t = await transcribeVideo(mediaUrl);
+      const t = await transcribeVideo(uploadedUrl);
       finalTranscript = t.text;
       words = t.words;
       if (!t.configured) captionsStatus = 'not_configured';
@@ -144,5 +146,5 @@ export async function generateTikTokContent(videoFile, onProgress, transcript = 
 
   onProgress('Parsing response...');
   const content = await response.json();
-  return { content, frames, transcript: finalTranscript, words, captionsStatus };
+  return { content, frames, transcript: finalTranscript, words, captionsStatus, mediaUrl: uploadedUrl };
 }
