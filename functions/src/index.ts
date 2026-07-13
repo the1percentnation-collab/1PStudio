@@ -745,8 +745,18 @@ const HIGGSFIELD_IMAGE2VIDEO = "/v1/image2video/dop";
 function hfError(data: any, status: number): string {
   const d = data?.detail ?? data?.message ?? data?.error;
   if (typeof d === "string") return d;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if (Array.isArray(d)) return d.map((x: any) => (x && x.msg) || JSON.stringify(x)).join("; ");
+  if (Array.isArray(d)) {
+    return d
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((x: any) => {
+        if (x && x.msg) {
+          const loc = Array.isArray(x.loc) ? x.loc.filter((l: unknown) => l !== "body").join(".") : "";
+          return loc ? `${loc}: ${x.msg}` : x.msg;
+        }
+        return JSON.stringify(x);
+      })
+      .join("; ");
+  }
   if (d) return JSON.stringify(d);
   return `Higgsfield error ${status}`;
 }
@@ -976,7 +986,8 @@ export const generateCoverImage = onRequest(
       res.status(400).json({ error: "A prompt is required." });
       return;
     }
-    const input = {
+    // Native /v1 API wraps generation params in a "params" object.
+    const params = {
       prompt: prompt.trim(),
       width_and_height: SOUL_SIZE[aspect || "9:16"] || "PORTRAIT_1536x2048",
       quality: "HD",
@@ -987,7 +998,7 @@ export const generateCoverImage = onRequest(
       const r = await fetch(`${HIGGSFIELD_BASE}/v1/text2image/soul`, {
         method: "POST",
         headers: { Authorization: `Key ${credentials}`, "Content-Type": "application/json" },
-        body: JSON.stringify(input),
+        body: JSON.stringify({ params }),
       });
       const data = (await r.json().catch(() => ({}))) as { request_id?: string; id?: string; detail?: string; message?: string };
       if (!r.ok) {
