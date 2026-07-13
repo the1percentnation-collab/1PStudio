@@ -1,11 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { SOCIAL_PLATFORMS, publishToSocial, publishByUrl } from '../services/socialService';
 
 // Posts a video to social platforms. Pass EITHER a `videoFile` (uploaded to
 // Storage first, with a progress bar) OR a `mediaUrl` for a clip that's already
 // hosted (e.g. a Higgsfield-generated / imported video) — that path skips upload.
-export default function PublishPanel({ videoFile, mediaUrl, content, onPublished, filename, thumbnail }) {
+export default function PublishPanel({ videoFile, mediaUrl, content, onPublished, filename, thumbnail, autoOpen }) {
   const [open, setOpen] = useState(false);
+
+  // open automatically when the editor sends us here via "Continue to Post"
+  useEffect(() => {
+    if (autoOpen) setOpen(true);
+  }, [autoOpen]);
   const [selected, setSelected] = useState([]);
   const [scheduleOn, setScheduleOn] = useState(false);
   const [scheduleAt, setScheduleAt] = useState('');

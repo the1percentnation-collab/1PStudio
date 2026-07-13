@@ -72,6 +72,9 @@ export default function App() {
       frames: { hookFrame: entry.frames?.hookFrame ?? null },
       content: entry.content,
       transcript: entry.transcript ? entry.transcript.slice(0, 5000) : '',
+      // keep word timings so captions survive reopening (a few KB per clip)
+      words: entry.words || [],
+      captionsStatus: entry.captionsStatus || null,
       error: entry.error,
       dateAdded: Date.now(),
     };
@@ -112,6 +115,7 @@ export default function App() {
           // word timings power the editor's synced captions; when a manual
           // transcript skips re-transcription, reuse the original timings
           words: (result.words?.length ? result.words : words) || [],
+          captionsStatus: result.captionsStatus || null,
           overlaySpec: null,
           error: null,
         };
@@ -181,11 +185,28 @@ export default function App() {
 
   const [editingId, setEditingId] = useState(null);
   const editingResult = results.find((r) => r.id === editingId) || null;
+  // when set, the matching card auto-opens its Post to Social panel, optionally
+  // pre-loaded with an edited (baked) video file from the editor
+  const [publishFor, setPublishFor] = useState(null); // { id, file }
 
   const handleEdit = useCallback((id) => setEditingId(id), []);
 
   const handleSaveSpec = useCallback((id, spec) => {
     setResults((prev) => prev.map((r) => (r.id === id ? { ...r, overlaySpec: spec } : r)));
+  }, []);
+
+  // editor resolved fresh word timings (via "Generate captions") — persist them
+  const handleWordsResolved = useCallback((id, words) => {
+    setResults((prev) => prev.map((r) => (r.id === id ? { ...r, words, captionsStatus: 'ok' } : r)));
+    setLibrary((prev) => prev.map((i) => (i.id === id ? { ...i, words } : i)));
+  }, []);
+
+  // editor's "Continue to Post": close the editor and open the card's publish
+  // panel, pre-loaded with the baked (edited) file when one was produced
+  const handleContinueToPost = useCallback((id, file) => {
+    setEditingId(null);
+    setView('composer');
+    setPublishFor({ id, file: file || null });
   }, []);
 
   const handleRemove = useCallback((id) => {
@@ -247,6 +268,8 @@ export default function App() {
                 onRemove={handleRemove}
                 onPublished={handlePublished}
                 onEdit={handleEdit}
+                autoOpenPublish={publishFor?.id === result.id}
+                overrideVideoFile={publishFor?.id === result.id ? publishFor.file : null}
               />
             ))}
           </div>
@@ -303,6 +326,8 @@ export default function App() {
           result={editingResult}
           onClose={() => setEditingId(null)}
           onSaveSpec={handleSaveSpec}
+          onWordsResolved={handleWordsResolved}
+          onContinueToPost={handleContinueToPost}
         />
       )}
     </div>

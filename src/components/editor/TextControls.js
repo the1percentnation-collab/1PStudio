@@ -1,7 +1,89 @@
-import React from 'react';
+import React, { useRef } from 'react';
 
 const SWATCHES = ['#FFFFFF', '#E60306', '#000000', '#FFC107'];
 const FONTS = ['Bebas Neue', 'DM Sans', 'Arial'];
+
+// Dual-thumb slider for a text element's on-screen time window. `end == null`
+// means "until the end". Writes { start, end } via onChange.
+function TimingSlider({ duration, start, end, playhead, onChange }) {
+  const trackRef = useRef(null);
+  const max = duration || 0;
+  const startVal = Math.max(0, Math.min(start ?? 0, max));
+  const endVal = end == null ? max : Math.max(0, Math.min(end, max));
+  const pct = (v) => (max > 0 ? (v / max) * 100 : 0);
+
+  const valueFromClientX = (clientX) => {
+    const rect = trackRef.current.getBoundingClientRect();
+    const t = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    return t * max;
+  };
+
+  const beginDrag = (which) => (e) => {
+    if (!max) return;
+    e.preventDefault();
+    const move = (ev) => {
+      const cx = ev.clientX ?? ev.touches?.[0]?.clientX;
+      if (cx == null) return;
+      const v = valueFromClientX(cx);
+      if (which === 'start') {
+        onChange({ start: Math.max(0, Math.min(v, endVal - 0.1)) });
+      } else {
+        const clamped = Math.max(startVal + 0.1, Math.min(v, max));
+        // snap to end-of-video → store null so it tracks the real duration
+        onChange({ end: clamped >= max - 0.05 ? null : clamped });
+      }
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  const thumb = (leftPct, onDown, key) => (
+    <div
+      key={key}
+      onPointerDown={onDown}
+      style={{
+        position: 'absolute',
+        left: `${leftPct}%`,
+        top: '50%',
+        width: 14,
+        height: 14,
+        marginLeft: -7,
+        marginTop: -7,
+        borderRadius: '50%',
+        background: '#E60306',
+        border: '2px solid #FFF',
+        cursor: max ? 'ew-resize' : 'not-allowed',
+        touchAction: 'none',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.5)',
+      }}
+    />
+  );
+
+  return (
+    <div style={{ padding: '10px 4px 4px' }}>
+      <div ref={trackRef} style={{ position: 'relative', height: 14 }}>
+        {/* base track */}
+        <div style={{ position: 'absolute', top: '50%', left: 0, right: 0, height: 4, marginTop: -2, background: '#2A2A2A', borderRadius: 2 }} />
+        {/* active range */}
+        <div style={{ position: 'absolute', top: '50%', height: 4, marginTop: -2, background: '#E60306', borderRadius: 2, left: `${pct(startVal)}%`, width: `${Math.max(0, pct(endVal) - pct(startVal))}%` }} />
+        {/* playhead marker */}
+        {max > 0 && playhead != null && (
+          <div style={{ position: 'absolute', top: -1, height: 16, width: 2, background: '#FFF', opacity: 0.7, left: `${pct(Math.min(playhead, max))}%` }} />
+        )}
+        {thumb(pct(startVal), beginDrag('start'), 'start')}
+        {thumb(pct(endVal), beginDrag('end'), 'end')}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#888', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
+        <span>{startVal.toFixed(1)}s</span>
+        <span>{end == null ? 'end' : `${endVal.toFixed(1)}s`}</span>
+      </div>
+    </div>
+  );
+}
 
 const labelStyle = {
   fontSize: 10,
@@ -35,7 +117,7 @@ function Toggle({ label, on, onChange }) {
   );
 }
 
-export default function TextControls({ texts, selectedId, duration, onChange, onAdd, onRemove, onSelect }) {
+export default function TextControls({ texts, selectedId, duration, currentTime, onChange, onAdd, onRemove, onSelect }) {
   const selected = texts.find((t) => t.id === selectedId) || null;
 
   return (
@@ -201,6 +283,17 @@ export default function TextControls({ texts, selectedId, duration, onChange, on
               label="Shadow"
               on={!!selected.shadow}
               onChange={(on) => onChange(selected.id, { shadow: on ? { color: 'rgba(0,0,0,0.8)', blur: 0.18, dx: 0, dy: 0.06 } : null })}
+            />
+          </div>
+
+          <div style={rowStyle}>
+            <label style={labelStyle}>Timing (drag to set when it shows)</label>
+            <TimingSlider
+              duration={duration}
+              start={selected.start}
+              end={selected.end}
+              playhead={currentTime}
+              onChange={(patch) => onChange(selected.id, patch)}
             />
           </div>
 

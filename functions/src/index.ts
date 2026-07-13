@@ -530,6 +530,7 @@ async function probeDimensions(file: string): Promise<{ width: number; height: n
 export const captionVideo = onRequest(
   {
     cors: true,
+    secrets: ["DEEPGRAM_API_KEY"],
     timeoutSeconds: 540,
     memory: "2GiB",
   },
@@ -633,6 +634,7 @@ export const captionVideo = onRequest(
 export const transcribeAudio = onRequest(
   {
     cors: true,
+    secrets: ["DEEPGRAM_API_KEY"],
     timeoutSeconds: 120,
     memory: "256MiB",
   },

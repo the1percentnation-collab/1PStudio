@@ -2,7 +2,7 @@
 // in real time, composites frames + overlays on a canvas, and records the
 // canvas stream with MediaRecorder. Export duration ≈ video duration.
 
-import { drawOverlays, ensureFontsLoaded } from './overlayRenderer';
+import { drawOverlays, ensureFontsLoaded, getCrop, drawVideoFrame, cropOutputDims } from './overlayRenderer';
 
 const MIME_CANDIDATES = [
   { mime: 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', ext: 'mp4', label: 'MP4 · H.264' },
@@ -60,9 +60,14 @@ export function exportVideo({ videoUrl, spec, onProgress }) {
     const videoH = video.videoHeight || 1280;
     const duration = video.duration || 0;
 
+    // Output = the cropped region (full frame when no crop). Overlays are drawn
+    // relative to the cropped output, so preview == export.
+    const crop = getCrop(spec);
+    const out = cropOutputDims(crop, videoW, videoH);
+
     const canvas = document.createElement('canvas');
-    canvas.width = videoW;
-    canvas.height = videoH;
+    canvas.width = out.w;
+    canvas.height = out.h;
     const ctx = canvas.getContext('2d');
 
     // Audio: reroute the element's output into a recording-only graph. The
@@ -83,7 +88,7 @@ export function exportVideo({ videoUrl, spec, onProgress }) {
     ]);
 
     // cap bitrate so long clips don't balloon in memory
-    const videoBitsPerSecond = Math.min(12_000_000, Math.round(videoW * videoH * 8));
+    const videoBitsPerSecond = Math.min(12_000_000, Math.round(out.w * out.h * 8));
     const recorder = picked.mime
       ? new MediaRecorder(combined, { mimeType: picked.mime, videoBitsPerSecond })
       : new MediaRecorder(combined, { videoBitsPerSecond });
@@ -97,8 +102,8 @@ export function exportVideo({ videoUrl, spec, onProgress }) {
     let intervalId = null;
 
     const drawFrame = () => {
-      ctx.drawImage(video, 0, 0, videoW, videoH);
-      drawOverlays(ctx, spec, video.currentTime, videoW, videoH);
+      drawVideoFrame(ctx, video, crop, videoW, videoH, out.w, out.h);
+      drawOverlays(ctx, spec, video.currentTime, out.w, out.h);
       if (Number.isFinite(duration) && duration > 0) onProgress?.(Math.min(1, video.currentTime / duration));
     };
 

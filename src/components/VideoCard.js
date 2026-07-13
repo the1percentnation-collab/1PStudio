@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import PublishPanel from './PublishPanel';
 
 const PILLAR_COLORS = {
@@ -320,10 +320,18 @@ function TranscriptPanel({ onRegenerate, isRegenerating, initialTranscript }) {
   );
 }
 
-export default function VideoCard({ result, onRegenerate, onRemove, onPublished, onEdit }) {
+export default function VideoCard({ result, onRegenerate, onRemove, onPublished, onEdit, autoOpenPublish, overrideVideoFile }) {
   const { id, filename, frames, content, error, _file, videoUrl, transcript } = result;
   const [isRegenerating, setIsRegenerating] = useState(false);
   const pillarColor = content ? (PILLAR_COLORS[content.content_pillar] || '#888') : '#888';
+  const cardRef = useRef(null);
+
+  // when the editor's "Continue to Post" targets this card, bring it into view
+  useEffect(() => {
+    if (autoOpenPublish && cardRef.current) {
+      cardRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [autoOpenPublish]);
 
   const handleRegenerate = async (transcript) => {
     setIsRegenerating(true);
@@ -348,7 +356,7 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished,
   };
 
   return (
-    <div style={{ background: '#111111', border: '1px solid #1A1A1A', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
+    <div ref={cardRef} style={{ background: '#111111', border: '1px solid #1A1A1A', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
       {/* CARD HEADER */}
       <div style={{ padding: '14px 16px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -489,11 +497,12 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished,
 
         {content && (
           <PublishPanel
-            videoFile={_file}
+            videoFile={overrideVideoFile || _file}
             content={content}
             onPublished={onPublished}
             filename={filename}
             thumbnail={frames?.hookFrame}
+            autoOpen={autoOpenPublish}
           />
         )}
 

@@ -2,8 +2,12 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import EditorStage from './EditorStage';
 import TextControls from './TextControls';
 import CaptionControls from './CaptionControls';
+import CropControls from './CropControls';
 import ExportPanel from './ExportPanel';
-import { createDefaultSpec, makeTextElement } from '../../services/overlayRenderer';
+import { createDefaultSpec, makeTextElement, getCrop, isFullFrame } from '../../services/overlayRenderer';
+import { groupWordsIntoCaptions } from '../../services/captionUtils';
+import { exportVideo } from '../../services/videoExporter';
+import { transcribeUploadedFile } from '../../services/claudeService';
 
 function formatTime(t) {
   if (!Number.isFinite(t)) return '0:00';
@@ -12,25 +16,35 @@ function formatTime(t) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-export default function VideoEditorModal({ result, onClose, onSaveSpec }) {
+export default function VideoEditorModal({ result, onClose, onSaveSpec, onWordsResolved, onContinueToPost }) {
   const videoRef = useRef(null);
-  const [spec, setSpec] = useState(() =>
-    result.overlaySpec ||
-    createDefaultSpec({
-      onScreenText: result.content?.on_screen_text || '',
-      words: result.words || [],
-    })
-  );
+  const [spec, setSpec] = useState(() => {
+    const base =
+      result.overlaySpec ||
+      createDefaultSpec({
+        onScreenText: result.content?.on_screen_text || '',
+        words: result.words || [],
+      });
+    // ensure older saved specs get a crop field
+    return base.crop ? base : { ...base, crop: { x: 0, y: 0, w: 1, h: 1 } };
+  });
+  const [words, setWords] = useState(result.words || []);
   const [selectedTextId, setSelectedTextId] = useState(spec.texts[0]?.id || null);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [videoDims, setVideoDims] = useState(null);
+  const [cropMode, setCropMode] = useState(false);
+  const [continuing, setContinuing] = useState(false);
+  const [continueProgress, setContinueProgress] = useState(0);
   const [exportState, setExportState] = useState({ status: 'idle', progress: 0, url: null, ext: null, error: null });
 
   const specRef = useRef(spec);
   specRef.current = spec;
+  const continueJobRef = useRef(null);
 
   const handleClose = useCallback(() => {
+    continueJobRef.current?.abort?.();
     onSaveSpec?.(result.id, specRef.current);
     onClose();
   }, [onSaveSpec, onClose, result.id]);
@@ -69,6 +83,18 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec }) {
     setSpec((s) => ({ ...s, captions: { ...s.captions, ...patch } }));
   }, []);
 
+  const setCrop = useCallback((crop) => {
+    setSpec((s) => ({ ...s, crop }));
+  }, []);
+
+  // "Generate captions" — transcribe this video on demand, inject the words
+  const handleGenerateCaptions = useCallback(async (onProgress) => {
+    const t = await transcribeUploadedFile(result._file, onProgress);
+    setWords(t.words);
+    setSpec((s) => ({ ...s, captions: { ...s.captions, enabled: true, lines: groupWordsIntoCaptions(t.words) } }));
+    onWordsResolved?.(result.id, t.words);
+  }, [result._file, result.id, onWordsResolved]);
+
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -88,7 +114,42 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec }) {
     setCurrentTime(t);
   }, []);
 
-  const isRendering = exportState.status === 'rendering';
+  // "Continue to Post": bake the edits (if any), then hand the file to the card
+  const handleContinueToPost = useCallback(async () => {
+    onSaveSpec?.(result.id, specRef.current);
+    const s = specRef.current;
+    const crop = getCrop(s);
+    const bakeable =
+      (s.texts || []).some((t) => t.text && t.text.trim()) ||
+      s.captions?.enabled ||
+      !isFullFrame(crop);
+
+    if (!bakeable) {
+      onContinueToPost?.(result.id, null);
+      return;
+    }
+
+    setContinuing(true);
+    setContinueProgress(0);
+    const job = exportVideo({ videoUrl: result.videoUrl, spec: s, onProgress: setContinueProgress });
+    continueJobRef.current = job;
+    try {
+      const { blob, ext } = await job.promise;
+      const base = (result.filename || 'video').replace(/\.[^.]+$/, '');
+      const file = new File([blob], `${base}-edited.${ext}`, { type: blob.type || 'video/mp4' });
+      onContinueToPost?.(result.id, file);
+    } catch (err) {
+      if (err?.message !== 'cancelled') {
+        setExportState({ status: 'error', progress: 0, url: null, ext: null, error: err?.message || 'Could not prepare the edited video.' });
+      }
+      setContinuing(false);
+    } finally {
+      continueJobRef.current = null;
+    }
+  }, [onSaveSpec, onContinueToPost, result.id, result.videoUrl, result.filename]);
+
+  const isRendering = exportState.status === 'rendering' || continuing;
+  const hasWords = words.length > 0;
 
   return (
     <div
@@ -152,8 +213,11 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec }) {
             onMoveText={(id, x, y) => patchText(id, { x, y })}
             onTimeUpdate={setCurrentTime}
             onDurationKnown={setDuration}
+            onDimsKnown={setVideoDims}
             onEnded={() => setPlaying(false)}
             videoRef={videoRef}
+            cropMode={cropMode}
+            onCropChange={setCrop}
           />
         </div>
 
@@ -171,15 +235,26 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec }) {
             texts={spec.texts}
             selectedId={selectedTextId}
             duration={duration}
+            currentTime={currentTime}
             onChange={patchText}
             onAdd={addText}
             onRemove={removeText}
             onSelect={setSelectedTextId}
           />
           <div style={{ borderTop: '1px solid #1A1A1A', margin: '18px 0' }} />
+          <CropControls
+            crop={spec.crop}
+            sourceDims={videoDims}
+            cropMode={cropMode}
+            onSetCrop={(c) => { setCrop(c); }}
+            onToggleCropMode={setCropMode}
+          />
+          <div style={{ borderTop: '1px solid #1A1A1A', margin: '18px 0' }} />
           <CaptionControls
             captions={spec.captions}
-            hasWords={(result.words || []).length > 0}
+            hasWords={hasWords}
+            canGenerate={!!result._file}
+            onGenerate={handleGenerateCaptions}
             onChange={patchCaptions}
           />
         </div>
@@ -211,6 +286,7 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec }) {
             borderRadius: '50%',
             cursor: isRendering ? 'not-allowed' : 'pointer',
             opacity: isRendering ? 0.5 : 1,
+            flexShrink: 0,
           }}
         >
           {playing ? '❚❚' : '▶'}
@@ -228,14 +304,38 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec }) {
         <span style={{ fontSize: 12, color: '#888', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
           {formatTime(currentTime)} / {formatTime(duration)}
         </span>
-        <ExportPanel
-          videoUrl={result.videoUrl}
-          spec={spec}
-          filename={result.filename}
-          duration={duration}
-          exportState={exportState}
-          setExportState={setExportState}
-        />
+
+        {/* Continue to Post — bakes edits then jumps to the publish panel */}
+        <button
+          onClick={handleContinueToPost}
+          disabled={isRendering}
+          style={{
+            background: '#00C48C',
+            color: '#03150F',
+            fontSize: 13,
+            fontWeight: 700,
+            padding: '9px 18px',
+            borderRadius: 8,
+            border: 'none',
+            cursor: isRendering ? 'not-allowed' : 'pointer',
+            opacity: exportState.status === 'rendering' ? 0.5 : 1,
+            flexShrink: 0,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {continuing ? `Preparing… ${Math.round(continueProgress * 100)}%` : 'Continue to Post →'}
+        </button>
+
+        <div style={{ pointerEvents: continuing ? 'none' : 'auto', opacity: continuing ? 0.5 : 1 }}>
+          <ExportPanel
+            videoUrl={result.videoUrl}
+            spec={spec}
+            filename={result.filename}
+            duration={duration}
+            exportState={exportState}
+            setExportState={setExportState}
+          />
+        </div>
       </div>
     </div>
   );
