@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
-import { SOCIAL_PLATFORMS, publishToSocial } from '../services/socialService';
+import { SOCIAL_PLATFORMS, publishToSocial, publishByUrl } from '../services/socialService';
 
-export default function PublishPanel({ videoFile, content, onPublished, filename, thumbnail }) {
+// Posts a video to social platforms. Pass EITHER a `videoFile` (uploaded to
+// Storage first, with a progress bar) OR a `mediaUrl` for a clip that's already
+// hosted (e.g. a Higgsfield-generated / imported video) — that path skips upload.
+export default function PublishPanel({ videoFile, mediaUrl, content, onPublished, filename, thumbnail }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState([]);
   const [scheduleOn, setScheduleOn] = useState(false);
@@ -32,13 +35,18 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
     setStatus(null);
     setProgress(0);
     try {
-      await publishToSocial(videoFile, {
-        post: caption,
-        title,
-        platforms: selected,
-        scheduleDate,
-        onProgress: setProgress,
-      });
+      if (mediaUrl) {
+        // Already-hosted clip — no upload step.
+        await publishByUrl(mediaUrl, { post: caption, title, platforms: selected, scheduleDate });
+      } else {
+        await publishToSocial(videoFile, {
+          post: caption,
+          title,
+          platforms: selected,
+          scheduleDate,
+          onProgress: setProgress,
+        });
+      }
       const isScheduled = Boolean(scheduleDate);
       setStatus({
         type: 'ok',
@@ -67,7 +75,7 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
 
   const uploadPct = Math.round(progress * 100);
 
-  const canPost = !posting && selected.length > 0 && caption.trim() && videoFile;
+  const canPost = !posting && selected.length > 0 && caption.trim() && (videoFile || mediaUrl);
 
   if (!open) {
     return (
@@ -212,13 +220,13 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
         />
       )}
 
-      {!videoFile && (
+      {!videoFile && !mediaUrl && (
         <div style={{ fontSize: 11, color: '#FFC107', marginBottom: 10, lineHeight: 1.45 }}>
           This card has no attached video file (e.g. loaded from Library), so it can’t be posted. Re-upload the video to post it.
         </div>
       )}
 
-      {posting && (
+      {posting && !mediaUrl && (
         <div style={{ marginBottom: 10 }}>
           <div style={{ height: 6, background: '#1A1A1A', borderRadius: 3, overflow: 'hidden' }}>
             <div

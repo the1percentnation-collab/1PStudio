@@ -683,3 +683,209 @@ export const transcribeAudio = onRequest(
     }
   }
 );
+
+// ---------------------------------------------------------------------------
+// Higgsfield AI video — generate a clip from a prompt (and optional source
+// image) via the Higgsfield Cloud API, or import an existing video by URL.
+// Both land the finished video in Firebase Storage so it can be posted through
+// the same /api/publish (Zernio) flow.
+//
+// Auth: HIGGSFIELD_CREDENTIALS is a Secret Manager secret in the form
+// "KEY_ID:KEY_SECRET", sent as `Authorization: Key <credentials>`.
+//
+// Flow is stateless/poll-based to match the rest of this backend (no Firestore,
+// no webhooks): /api/generate submits a job and returns a requestId; the
+// browser polls /api/video-status until it's completed, at which point the
+// output video is copied into Storage and a durable URL is returned.
+// ---------------------------------------------------------------------------
+
+const HIGGSFIELD_BASE = "https://platform.higgsfield.ai";
+// Image-to-video (DoP) application path; see cloud.higgsfield.ai for the catalog.
+const HIGGSFIELD_IMAGE2VIDEO = "/v1/image2video/dop";
+
+// Pull output media URLs out of a Higgsfield status payload, tolerating the
+// several shapes the API uses.
+function higgsfieldResultUrls(payload: Record<string, unknown>): string[] {
+  const urls: string[] = [];
+  const push = (v: unknown) => {
+    if (!v) return;
+    if (typeof v === "string") urls.push(v);
+    else if (typeof v === "object" && (v as { url?: string }).url) urls.push((v as { url: string }).url);
+  };
+  push((payload as { video?: unknown }).video);
+  for (const key of ["videos", "images", "results"]) {
+    const arr = (payload as Record<string, unknown>)[key];
+    if (Array.isArray(arr)) arr.forEach(push);
+  }
+  const jobs = (payload as { jobs?: unknown }).jobs;
+  if (Array.isArray(jobs)) {
+    for (const j of jobs) {
+      const results = (j as { results?: { raw?: unknown } })?.results;
+      if (results) push(results.raw ?? results);
+    }
+  }
+  return urls;
+}
+
+// Save a remote video/image into Storage with a public download token.
+async function saveToStorage(sourceUrl: string, prefix: string): Promise<{ url: string; contentType: string }> {
+  const r = await fetch(sourceUrl);
+  if (!r.ok) throw new Error(`Download failed (${r.status})`);
+  const contentType = r.headers.get("content-type") || "video/mp4";
+  const ext = contentType.includes("image") ? "jpg" : "mp4";
+  const buf = Buffer.from(await r.arrayBuffer());
+  const bucket = getStorage().bucket();
+  const token = randomUUID();
+  const objectPath = `${prefix}/${Date.now()}-${randomUUID()}.${ext}`;
+  await bucket.file(objectPath).save(buf, {
+    resumable: false,
+    metadata: { contentType, metadata: { firebaseStorageDownloadTokens: token } },
+  });
+  const url = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(objectPath)}?alt=media&token=${token}`;
+  return { url, contentType };
+}
+
+interface GenerateBody {
+  prompt?: string;
+  imageUrl?: string;
+  model?: string;
+}
+
+export const generateVideo = onRequest(
+  {
+    cors: true,
+    secrets: ["HIGGSFIELD_CREDENTIALS"],
+    timeoutSeconds: 120,
+    memory: "256MiB",
+  },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+    const credentials = process.env.HIGGSFIELD_CREDENTIALS;
+    if (!credentials) {
+      res.status(500).json({ error: "HIGGSFIELD_CREDENTIALS is not configured on the server." });
+      return;
+    }
+
+    const { prompt, imageUrl, model } = (req.body ?? {}) as GenerateBody;
+    if (!prompt?.trim() && !imageUrl?.trim()) {
+      res.status(400).json({ error: "A prompt or a source image URL is required." });
+      return;
+    }
+
+    const modelPath = model || HIGGSFIELD_IMAGE2VIDEO;
+    const input = imageUrl?.trim()
+      ? {
+          model: "dop-turbo",
+          prompt: prompt?.trim() || "",
+          input_images: [{ type: "image_url", image_url: imageUrl.trim() }],
+        }
+      : { prompt: prompt?.trim(), aspect_ratio: "9:16" };
+
+    try {
+      const r = await fetch(`${HIGGSFIELD_BASE}${modelPath}`, {
+        method: "POST",
+        headers: { Authorization: `Key ${credentials}`, "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const data = (await r.json().catch(() => ({}))) as { request_id?: string; id?: string; detail?: string; message?: string };
+      if (!r.ok) {
+        res.status(r.status).json({ error: data.detail || data.message || `Higgsfield error ${r.status}`, details: data });
+        return;
+      }
+      const requestId = data.request_id || data.id;
+      if (!requestId) {
+        res.status(502).json({ error: "Higgsfield did not return a request id.", details: data });
+        return;
+      }
+      res.json({ status: "ok", requestId });
+    } catch (e) {
+      res.status(502).json({ error: `Failed to reach Higgsfield: ${e instanceof Error ? e.message : "unknown error"}` });
+    }
+  }
+);
+
+export const videoStatus = onRequest(
+  {
+    cors: true,
+    secrets: ["HIGGSFIELD_CREDENTIALS"],
+    timeoutSeconds: 120,
+    memory: "512MiB",
+  },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+    const credentials = process.env.HIGGSFIELD_CREDENTIALS;
+    if (!credentials) {
+      res.status(500).json({ error: "HIGGSFIELD_CREDENTIALS is not configured on the server." });
+      return;
+    }
+    const { requestId } = (req.body ?? {}) as { requestId?: string };
+    if (!requestId) {
+      res.status(400).json({ error: "requestId is required." });
+      return;
+    }
+
+    try {
+      const r = await fetch(`${HIGGSFIELD_BASE}/requests/${requestId}/status`, {
+        headers: { Authorization: `Key ${credentials}` },
+      });
+      const data = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!r.ok) {
+        res.status(r.status).json({ error: (data.detail as string) || (data.message as string) || `Higgsfield error ${r.status}` });
+        return;
+      }
+
+      const status = (data.status as string) || "in_progress";
+      if (status !== "completed") {
+        // queued | in_progress | failed | nsfw | canceled
+        const pending = status === "queued" || status === "in_progress";
+        res.json({ status: pending ? "generating" : status });
+        return;
+      }
+
+      const urls = higgsfieldResultUrls(data);
+      if (!urls.length) {
+        res.json({ status: "failed", error: "Completed but no output URL was returned." });
+        return;
+      }
+      const { url, contentType } = await saveToStorage(urls[0], "higgsfield");
+      res.json({ status: "ready", videoUrl: url, mediaType: contentType.includes("image") ? "image" : "video" });
+    } catch (e) {
+      res.status(502).json({ error: e instanceof Error ? e.message : "Status check failed." });
+    }
+  }
+);
+
+export const importVideo = onRequest(
+  {
+    cors: true,
+    timeoutSeconds: 300,
+    memory: "1GiB",
+  },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+    const { url } = (req.body ?? {}) as { url?: string };
+    if (!url || !/^https:\/\//.test(url)) {
+      res.status(400).json({ error: "A valid https URL is required." });
+      return;
+    }
+    try {
+      const { url: storedUrl, contentType } = await saveToStorage(url, "imported");
+      if (!/video|image|octet-stream/.test(contentType)) {
+        res.status(400).json({ error: `That URL is not a video or image (got ${contentType}).` });
+        return;
+      }
+      res.json({ status: "ok", videoUrl: storedUrl, mediaType: contentType.includes("image") ? "image" : "video" });
+    } catch (e) {
+      res.status(502).json({ error: `Import failed: ${e instanceof Error ? e.message : "unknown error"}` });
+    }
+  }
+);

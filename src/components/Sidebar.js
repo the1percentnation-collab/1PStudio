@@ -23,6 +23,12 @@ const ICONS = {
       <line x1="7" y1="15" x2="15" y2="15" />
     </>
   ),
+  aivideo: (
+    <>
+      <polygon points="23 7 16 12 23 17 23 7" />
+      <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+    </>
+  ),
   calendar: (
     <>
       <rect x="3" y="4" width="18" height="18" rx="2" />
@@ -73,6 +79,7 @@ function Icon({ name }) {
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
   { id: 'composer', label: 'Composer', icon: 'composer' },
+  { id: 'aivideo', label: 'AI Video', icon: 'aivideo' },
   { id: 'captions', label: 'Captions', icon: 'captions' },
   { id: 'calendar', label: 'Calendar', icon: 'calendar' },
   { id: 'analytics', label: 'Analytics', icon: 'analytics' },

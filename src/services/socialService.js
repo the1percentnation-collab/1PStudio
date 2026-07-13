@@ -67,6 +67,21 @@ export async function publishToSocial(videoFile, { post, title, platforms, sched
   }
 
   const mediaUrl = await uploadVideo(videoFile, onProgress);
+  return publishByUrl(mediaUrl, { post, title, platforms, scheduleDate });
+}
+
+// Publishes an already-hosted video URL (e.g. a Higgsfield-generated or
+// imported clip that already lives in Storage) — no browser upload needed.
+export async function publishByUrl(mediaUrl, { post, title, platforms, scheduleDate }) {
+  if (!mediaUrl) {
+    throw new Error('No video URL to publish.');
+  }
+  if (!platforms || platforms.length === 0) {
+    throw new Error('Select at least one platform to post to.');
+  }
+  if (!post || !post.trim()) {
+    throw new Error('Caption is required to publish.');
+  }
 
   const response = await fetch('/api/publish', {
     method: 'POST',

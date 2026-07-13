@@ -26,6 +26,11 @@ These aren't tests — they're the setup the app needs. Skip any you've already 
   upload step.)
 - [ ] **At least one social account connected in Zernio** — zernio.com/dashboard.
   Connect TikTok and/or Instagram (first two are free).
+- [ ] **(For AI Video only) Higgsfield secret set** and a paid Higgsfield plan:
+  ```bash
+  npx firebase-tools functions:secrets:get HIGGSFIELD_CREDENTIALS --project onepstudio-9a3ef
+  ```
+  Value format is `KEY_ID:KEY_SECRET`. Skip this if you're not testing AI Video yet.
 - [ ] **Latest code is deployed** — functions **and** hosting:
   ```bash
   git fetch origin && git checkout claude/build-this-fkmvrf && git reset --hard origin/claude/build-this-fkmvrf
@@ -137,6 +142,35 @@ configured" message — that's expected, not a bug in our changes.
 
 ---
 
+## 6b. AI Video — Higgsfield generate + import (NEW)
+
+Only if you set `HIGGSFIELD_CREDENTIALS` (prerequisite 0) and have a paid
+Higgsfield plan. There's a new **AI Video** item in the sidebar.
+
+**Import (fastest to verify — no generation credits used):**
+- [ ] Click **AI Video** → **Import from URL**.
+- [ ] Paste a direct `https` link to a short .mp4 and click **Import**.
+- [ ] It appears under "Ready to post" with a video preview.
+
+**Generate:**
+- [ ] In **Generate with Higgsfield**, type a prompt (optionally a source image
+      URL for image-to-video) and click **Generate**.
+- [ ] Status shows "Generating… Ns elapsed" and can take a few minutes.
+- [ ] When done, the clip appears under "Ready to post".
+
+**Post a ready clip:**
+- [ ] On a ready clip, click **Post to Social**, pick a connected platform, add a
+      caption, click **Post Now**.
+
+**Passing:** import brings the video in; generate eventually produces a clip;
+posting a ready clip publishes it (no re-upload needed — it's already hosted).
+
+**If generate errors immediately:** the Higgsfield model path/params may need
+adjusting for your plan — copy the exact red error (it comes straight from
+Higgsfield) and send it to me. Import not working points to a bad/expired link.
+
+---
+
 ## 7. Calendar & Library (local, should be unaffected)
 
 - [ ] After posting/scheduling above, open **Calendar** — the post you scheduled
@@ -166,9 +200,7 @@ integration; placeholder/derived charts are expected.)
 | `captionVideo`, `transcribeAudio` | accidentally deleted by an earlier deploy | **restored** |
 | `analyzeVideo` | Claude content gen | unchanged |
 | Accounts page copy / dashboard link | "Ayrshare" | "Zernio" |
-
-**Not included yet:** Higgsfield AI-video generation/import. That's a separate
-follow-up — tell me if you want it after this passes.
+| **AI Video** (Higgsfield generate/import → post) | didn't exist | **new** sidebar tab + `/api/generate`, `/api/video-status`, `/api/import` |
 
 ---
 
@@ -182,6 +214,9 @@ follow-up — tell me if you want it after this passes.
 4. Post video (no plan error):  PASS / FAIL — exact error if any:
 5. Schedule post:        PASS / FAIL — notes:
 6. Captions:             PASS / FAIL / SKIPPED (no Deepgram key) — notes:
+6b. AI Video import:     PASS / FAIL / SKIPPED — notes:
+6b. AI Video generate:   PASS / FAIL / SKIPPED — notes:
+6b. Post a ready clip:   PASS / FAIL / SKIPPED — notes:
 7. Calendar & Library:   PASS / FAIL — notes:
 8. Analytics:            PASS / FAIL — notes:
 
