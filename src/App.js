@@ -80,6 +80,8 @@ export default function App() {
       // so the Library can post/reshare it later
       mediaUrl: entry.mediaUrl || null,
       sharedPlatforms: entry.sharedPlatforms || [],
+      // saved editor overlays so a Library edit reopens where you left off
+      overlaySpec: entry.overlaySpec || null,
       error: entry.error,
       dateAdded: Date.now(),
     };
@@ -207,11 +209,31 @@ export default function App() {
   const [coverId, setCoverId] = useState(null);
   const coverResult = results.find((r) => r.id === coverId) || null;
 
+  // editing a saved Library item: build a result-like object from its stored
+  // metadata + durable video URL
+  const [libEditId, setLibEditId] = useState(null);
+  const libEditItem = library.find((i) => i.id === libEditId) || null;
+  const libEditTarget = libEditItem && libEditItem.mediaUrl ? {
+    id: libEditItem.id,
+    filename: libEditItem.filename,
+    videoUrl: libEditItem.mediaUrl,
+    mediaUrl: libEditItem.mediaUrl,
+    words: libEditItem.words || [],
+    content: libEditItem.content,
+    overlaySpec: libEditItem.overlaySpec || null,
+    _file: null,
+  } : null;
+  const editorTarget = editingResult || libEditTarget;
+
   const handleEdit = useCallback((id) => setEditingId(id), []);
+  const handleEditLibrary = useCallback((id) => setLibEditId(id), []);
   const handleMakeCover = useCallback((id) => setCoverId(id), []);
+
+  const closeEditor = useCallback(() => { setEditingId(null); setLibEditId(null); }, []);
 
   const handleSaveSpec = useCallback((id, spec) => {
     setResults((prev) => prev.map((r) => (r.id === id ? { ...r, overlaySpec: spec } : r)));
+    setLibrary((prev) => prev.map((i) => (i.id === id ? { ...i, overlaySpec: spec } : i)));
   }, []);
 
   // editor resolved fresh word timings (via "Generate captions") — persist them
@@ -224,7 +246,13 @@ export default function App() {
   // panel, pre-loaded with the baked (edited) file when one was produced
   const handleContinueToPost = useCallback((id, file) => {
     setEditingId(null);
-    setView('composer');
+    setLibEditId(null);
+    // route to whichever surface holds this item
+    setResults((prev) => {
+      const inResults = prev.some((r) => r.id === id);
+      setView(inResults ? 'composer' : 'library');
+      return prev;
+    });
     setPublishFor({ id, file: file || null });
   }, []);
 
@@ -264,6 +292,9 @@ export default function App() {
           onDelete={handleLibraryDelete}
           onShared={handleLibraryShared}
           onPublished={handlePublished}
+          onEditLibrary={handleEditLibrary}
+          autoOpenId={publishFor?.id}
+          overrideFile={publishFor?.file}
         />
       );
     }
@@ -348,10 +379,11 @@ export default function App() {
       </div>
 
       {/* full-screen editor — zIndex above Sidebar (200) and top bar (100) */}
-      {editingResult && (
+      {editorTarget && (
         <VideoEditorModal
-          result={editingResult}
-          onClose={() => setEditingId(null)}
+          key={editorTarget.id}
+          result={editorTarget}
+          onClose={closeEditor}
           onSaveSpec={handleSaveSpec}
           onWordsResolved={handleWordsResolved}
           onContinueToPost={handleContinueToPost}

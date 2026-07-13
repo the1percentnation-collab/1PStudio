@@ -46,10 +46,8 @@ export default function PublishPanel({ videoFile, mediaUrl, content, onPublished
     setStatus(null);
     setProgress(0);
     try {
-      if (mediaUrl) {
-        // Already-hosted clip — no upload step.
-        await publishByUrl(mediaUrl, { post: caption, title, platforms: selected, scheduleDate });
-      } else {
+      if (videoFile) {
+        // An attached/edited file — upload it, then post (progress bar shows).
         await publishToSocial(videoFile, {
           post: caption,
           title,
@@ -57,6 +55,9 @@ export default function PublishPanel({ videoFile, mediaUrl, content, onPublished
           scheduleDate,
           onProgress: setProgress,
         });
+      } else if (mediaUrl) {
+        // Already-hosted clip (e.g. from the Library) — no upload step.
+        await publishByUrl(mediaUrl, { post: caption, title, platforms: selected, scheduleDate });
       }
       const isScheduled = Boolean(scheduleDate);
       setStatus({
@@ -300,7 +301,7 @@ export default function PublishPanel({ videoFile, mediaUrl, content, onPublished
         </div>
       )}
 
-      {posting && !mediaUrl && (
+      {posting && videoFile && (
         <div style={{ marginBottom: 10 }}>
           <div style={{ height: 6, background: '#1A1A1A', borderRadius: 3, overflow: 'hidden' }}>
             <div

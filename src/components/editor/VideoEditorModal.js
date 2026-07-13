@@ -29,6 +29,33 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec, onWordsR
     return base.crop ? base : { ...base, crop: { x: 0, y: 0, w: 1, h: 1 } };
   });
   const [words, setWords] = useState(result.words || []);
+  // Library items only have a remote (Firebase Storage) URL. Fetch it into a
+  // local blob so the canvas preview AND the export/bake work without CORS
+  // tainting. Composer items are already blob: URLs and pass straight through.
+  const isBlob = !!result.videoUrl && result.videoUrl.startsWith('blob:');
+  const [sourceUrl, setSourceUrl] = useState(isBlob ? result.videoUrl : null);
+  const [srcError, setSrcError] = useState('');
+  useEffect(() => {
+    if (isBlob || !result.videoUrl) return;
+    let alive = true;
+    let created = null;
+    (async () => {
+      try {
+        const res = await fetch(result.videoUrl);
+        if (!res.ok) throw new Error(`Could not load video (${res.status})`);
+        const blob = await res.blob();
+        if (!alive) return;
+        created = URL.createObjectURL(blob);
+        setSourceUrl(created);
+      } catch (e) {
+        if (!alive) return;
+        // fall back to the remote URL: preview works, export may be blocked
+        setSourceUrl(result.videoUrl);
+        setSrcError('Loaded from a hosted copy — if export fails, enable CORS on the Storage bucket.');
+      }
+    })();
+    return () => { alive = false; if (created) URL.revokeObjectURL(created); };
+  }, [result.videoUrl, isBlob]);
   const [selectedTextId, setSelectedTextId] = useState(spec.texts[0]?.id || null);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
@@ -131,7 +158,7 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec, onWordsR
 
     setContinuing(true);
     setContinueProgress(0);
-    const job = exportVideo({ videoUrl: result.videoUrl, spec: s, onProgress: setContinueProgress });
+    const job = exportVideo({ videoUrl: sourceUrl, spec: s, onProgress: setContinueProgress });
     continueJobRef.current = job;
     try {
       const { blob, ext } = await job.promise;
@@ -146,7 +173,7 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec, onWordsR
     } finally {
       continueJobRef.current = null;
     }
-  }, [onSaveSpec, onContinueToPost, result.id, result.videoUrl, result.filename]);
+  }, [onSaveSpec, onContinueToPost, result.id, result.filename, sourceUrl]);
 
   const isRendering = exportState.status === 'rendering' || continuing;
   const hasWords = words.length > 0;
@@ -202,11 +229,18 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec, onWordsR
         </button>
       </div>
 
+      {srcError && (
+        <div style={{ padding: '6px 20px', background: '#FBBF2411', borderBottom: '1px solid #3A3015', color: '#D9B65A', fontSize: 11, flexShrink: 0 }}>
+          {srcError}
+        </div>
+      )}
+
       {/* STAGE + CONTROLS */}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <div style={{ flex: 1, display: 'flex', padding: 16, minWidth: 0 }}>
+          {sourceUrl ? (
           <EditorStage
-            videoUrl={result.videoUrl}
+            videoUrl={sourceUrl}
             spec={spec}
             selectedTextId={selectedTextId}
             onSelectText={setSelectedTextId}
@@ -219,6 +253,11 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec, onWordsR
             cropMode={cropMode}
             onCropChange={setCrop}
           />
+          ) : (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666', fontSize: 14 }}>
+              Loading video…
+            </div>
+          )}
         </div>
 
         <div
@@ -328,7 +367,7 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec, onWordsR
 
         <div style={{ pointerEvents: continuing ? 'none' : 'auto', opacity: continuing ? 0.5 : 1 }}>
           <ExportPanel
-            videoUrl={result.videoUrl}
+            videoUrl={sourceUrl}
             spec={spec}
             filename={result.filename}
             duration={duration}
