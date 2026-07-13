@@ -105,6 +105,49 @@ export default function PublishPanel({ videoFile, mediaUrl, content, onPublished
     );
   }
 
+  // SUCCESS STATE — replaces the compose form so it's unmistakable it posted
+  if (status?.type === 'ok' && !posting) {
+    const scheduled = status.message.startsWith('Scheduled');
+    return (
+      <div
+        style={{
+          width: '100%',
+          marginTop: 8,
+          background: '#03150F',
+          border: '1px solid #00C48C',
+          borderRadius: 10,
+          padding: 18,
+          boxSizing: 'border-box',
+          textAlign: 'center',
+        }}
+      >
+        <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#00C48C22', border: '1px solid #00C48C', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 10px', color: '#00C48C', fontSize: 22 }}>
+          ✓
+        </div>
+        <div style={{ color: '#00C48C', fontSize: 16, fontWeight: 700, marginBottom: 4 }}>
+          {scheduled ? 'Scheduled!' : 'Posted!'}
+        </div>
+        <div style={{ color: '#9FE7CF', fontSize: 12, marginBottom: 16, lineHeight: 1.5 }}>
+          {status.message}
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+          <button
+            onClick={() => { setStatus(null); setOpen(false); }}
+            style={{ background: '#00C48C', color: '#03150F', fontSize: 13, fontWeight: 700, padding: '8px 20px', borderRadius: 8, border: 'none', cursor: 'pointer' }}
+          >
+            Done
+          </button>
+          <button
+            onClick={() => { setStatus(null); setSelected([]); }}
+            style={{ background: 'transparent', border: '1px solid #2A6B57', color: '#9FE7CF', fontSize: 13, padding: '8px 16px', borderRadius: 8, cursor: 'pointer' }}
+          >
+            Post another
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       style={{
