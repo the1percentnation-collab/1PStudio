@@ -738,6 +738,19 @@ const HIGGSFIELD_BASE = "https://platform.higgsfield.ai";
 // Image-to-video (DoP) application path; see cloud.higgsfield.ai for the catalog.
 const HIGGSFIELD_IMAGE2VIDEO = "/v1/image2video/dop";
 
+// Turn any Higgsfield error payload into a readable string. Their validation
+// errors come back as { detail: [{ msg, loc, ... }] } or nested objects, so a
+// naive `.detail` renders as "[object Object]".
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function hfError(data: any, status: number): string {
+  const d = data?.detail ?? data?.message ?? data?.error;
+  if (typeof d === "string") return d;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (Array.isArray(d)) return d.map((x: any) => (x && x.msg) || JSON.stringify(x)).join("; ");
+  if (d) return JSON.stringify(d);
+  return `Higgsfield error ${status}`;
+}
+
 // Pull output media URLs out of a Higgsfield status payload, tolerating the
 // several shapes the API uses.
 function higgsfieldResultUrls(payload: Record<string, unknown>): string[] {
@@ -827,7 +840,7 @@ export const generateVideo = onRequest(
       });
       const data = (await r.json().catch(() => ({}))) as { request_id?: string; id?: string; detail?: string; message?: string };
       if (!r.ok) {
-        res.status(r.status).json({ error: data.detail || data.message || `Higgsfield error ${r.status}`, details: data });
+        res.status(r.status).json({ error: hfError(data, r.status), details: data });
         return;
       }
       const requestId = data.request_id || data.id;
@@ -871,7 +884,7 @@ export const videoStatus = onRequest(
       });
       const data = (await r.json().catch(() => ({}))) as Record<string, unknown>;
       if (!r.ok) {
-        res.status(r.status).json({ error: (data.detail as string) || (data.message as string) || `Higgsfield error ${r.status}` });
+        res.status(r.status).json({ error: hfError(data, r.status) });
         return;
       }
 
@@ -978,7 +991,7 @@ export const generateCoverImage = onRequest(
       });
       const data = (await r.json().catch(() => ({}))) as { request_id?: string; id?: string; detail?: string; message?: string };
       if (!r.ok) {
-        res.status(r.status).json({ error: data.detail || data.message || `Higgsfield error ${r.status}`, details: data });
+        res.status(r.status).json({ error: hfError(data, r.status), details: data });
         return;
       }
       const requestId = data.request_id || data.id;
@@ -1021,7 +1034,7 @@ export const coverImageStatus = onRequest(
       });
       const data = (await r.json().catch(() => ({}))) as Record<string, unknown>;
       if (!r.ok) {
-        res.status(r.status).json({ error: (data.detail as string) || (data.message as string) || `Higgsfield error ${r.status}` });
+        res.status(r.status).json({ error: hfError(data, r.status) });
         return;
       }
       const status = (data.status as string) || "in_progress";

@@ -5,6 +5,14 @@
 // Firebase Storage and hands back a durable URL). importVideo pulls an existing
 // video URL into Storage the same way.
 
+// Coerce any server error payload into a readable string (never "[object Object]").
+function errText(data, res, fallback) {
+  const e = data?.error;
+  if (typeof e === 'string') return e;
+  if (e) { try { return JSON.stringify(e); } catch { /* ignore */ } }
+  return fallback || `Request failed (${res.status})`;
+}
+
 // Kick off a generation. { prompt, imageUrl? } -> { requestId }
 export async function generateVideo({ prompt, imageUrl }) {
   const res = await fetch('/api/generate', {
@@ -13,7 +21,7 @@ export async function generateVideo({ prompt, imageUrl }) {
     body: JSON.stringify({ prompt, imageUrl }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || `Generation failed (${res.status})`);
+  if (!res.ok) throw new Error(errText(data, res, `Generation failed (${res.status})`));
   return data; // { status:'ok', requestId }
 }
 
@@ -25,7 +33,7 @@ export async function checkVideoStatus(requestId) {
     body: JSON.stringify({ requestId }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || `Status check failed (${res.status})`);
+  if (!res.ok) throw new Error(errText(data, res, `Status check failed (${res.status})`));
   return data;
 }
 
@@ -58,7 +66,7 @@ export async function generateCoverImage(prompt, aspect) {
     body: JSON.stringify({ prompt, aspect }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || `Generation failed (${res.status})`);
+  if (!res.ok) throw new Error(errText(data, res, `Generation failed (${res.status})`));
   return data;
 }
 
@@ -69,7 +77,7 @@ async function checkCoverImage(requestId) {
     body: JSON.stringify({ requestId }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || `Status check failed (${res.status})`);
+  if (!res.ok) throw new Error(errText(data, res, `Status check failed (${res.status})`));
   return data;
 }
 
@@ -97,6 +105,6 @@ export async function importVideo(url) {
     body: JSON.stringify({ url }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || `Import failed (${res.status})`);
+  if (!res.ok) throw new Error(errText(data, res, `Import failed (${res.status})`));
   return data;
 }
