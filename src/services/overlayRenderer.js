@@ -93,6 +93,7 @@ export async function ensureFontsLoaded() {
   try {
     await Promise.all([
       document.fonts.load("400 32px 'Bebas Neue'"),
+      document.fonts.load("400 32px 'Anton'"),
       document.fonts.load("700 32px 'DM Sans'"),
       document.fonts.load("800 32px 'DM Sans'"),
     ]);

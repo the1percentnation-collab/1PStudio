@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { drawOverlays, getTextBounds, ensureFontsLoaded, makeTextElement } from '../../services/overlayRenderer';
 import TextControls from '../editor/TextControls';
 import { generateCoverImage, pollCoverImage } from '../../services/higgsfieldService';
+import { removeBackground } from '@imgly/background-removal';
 
 const DEFAULT_AI_PROMPT =
   'Dark cinematic poster background, dramatic storm clouds and red embers, moody volumetric lighting, smoke, high contrast, gritty texture, empty space for a subject, no people, no text';
@@ -25,11 +26,17 @@ function drawCover(ctx, img, W, H) {
 }
 
 // Shared scene render (no selection UI) — used by preview and export.
-function drawCoverScene(ctx, bgImage, texts, W, H) {
+// Layers: background image -> cut-out subject -> text overlays.
+function drawCoverScene(ctx, bgImage, subject, texts, W, H) {
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
   drawCover(ctx, bgImage, W, H);
+  if (subject?.img) {
+    const sh = subject.scale * H;
+    const sw = sh * (subject.img.width / subject.img.height);
+    ctx.drawImage(subject.img, subject.x * W - sw / 2, subject.y * H - sh / 2, sw, sh);
+  }
   drawOverlays(ctx, { texts }, 0, W, H);
 }
 
@@ -40,16 +47,18 @@ function loadImage(src, cb) {
 }
 
 // Static-image stage: background + draggable text, at cover resolution.
-function CoverStage({ bgImage, dims, texts, selectedId, onSelectText, onMoveText }) {
+function CoverStage({ bgImage, subject, dims, texts, selectedId, onSelectText, onMoveText }) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const bgRef = useRef(bgImage);
+  const subjectRef = useRef(subject);
   const textsRef = useRef(texts);
   const selRef = useRef(selectedId);
   const dragRef = useRef(null);
   const [containerSize, setContainerSize] = useState(null);
 
   bgRef.current = bgImage;
+  subjectRef.current = subject;
   textsRef.current = texts;
   selRef.current = selectedId;
 
@@ -70,7 +79,7 @@ function CoverStage({ bgImage, dims, texts, selectedId, onSelectText, onMoveText
       const canvas = canvasRef.current;
       if (canvas) {
         const ctx = canvas.getContext('2d');
-        drawCoverScene(ctx, bgRef.current, textsRef.current, canvas.width, canvas.height);
+        drawCoverScene(ctx, bgRef.current, subjectRef.current, textsRef.current, canvas.width, canvas.height);
         if (selRef.current) {
           const b = getTextBounds(ctx, { texts: textsRef.current }, canvas.width, canvas.height).find((r) => r.id === selRef.current);
           if (b) {
@@ -160,6 +169,7 @@ export default function CoverStudio({ result, onClose }) {
   const [texts, setTexts] = useState(() => {
     const t = makeTextElement({ text: content?.thumbnail_text || content?.on_screen_text || 'YOUR TEXT', x: 0.5, y: 0.8 });
     t.size = 0.09;
+    t.font = 'Anton'; // heavy condensed — matches the cover look
     return [t];
   });
   const [selectedId, setSelectedId] = useState(texts[0]?.id || null);
@@ -173,11 +183,25 @@ export default function CoverStudio({ result, onClose }) {
   const [aiMsg, setAiMsg] = useState('');
   const [aiError, setAiError] = useState('');
 
+  // subject cut-out (in-browser background removal)
+  const [lastFrameSrc, setLastFrameSrc] = useState(null); // last real frame/upload src
+  const [subjectImage, setSubjectImage] = useState(null);
+  const [subjScale, setSubjScale] = useState(0.95);
+  const [subjX, setSubjX] = useState(0.5);
+  const [subjY, setSubjY] = useState(0.6);
+  const [cutBusy, setCutBusy] = useState(false);
+  const [cutError, setCutError] = useState('');
+  const subject = subjectImage ? { img: subjectImage, scale: subjScale, x: subjX, y: subjY } : null;
+
   const dims = ASPECTS[aspect];
 
   // default background = the hook frame if we have one
   useEffect(() => {
-    if (frames?.hookFrame) loadImage(`data:image/jpeg;base64,${frames.hookFrame}`, setBgImage);
+    if (frames?.hookFrame) {
+      const src = `data:image/jpeg;base64,${frames.hookFrame}`;
+      setLastFrameSrc(src);
+      loadImage(src, setBgImage);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -193,6 +217,7 @@ export default function CoverStudio({ result, onClose }) {
   const addText = useCallback(() => {
     const t = makeTextElement({ text: 'NEW TEXT', x: 0.5, y: 0.5 });
     t.size = 0.07;
+    t.font = 'Anton';
     setTexts((ts) => [...ts, t]);
     setSelectedId(t.id);
   }, []);
@@ -201,12 +226,35 @@ export default function CoverStudio({ result, onClose }) {
     setSelectedId((c) => (c === id ? null : c));
   }, []);
 
-  const applyFrame = (b64) => b64 && loadImage(`data:image/jpeg;base64,${b64}`, setBgImage);
+  const applyFrame = (b64) => {
+    if (!b64) return;
+    const src = `data:image/jpeg;base64,${b64}`;
+    setLastFrameSrc(src);
+    loadImage(src, setBgImage);
+  };
 
   const onUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    loadImage(URL.createObjectURL(file), setBgImage);
+    const src = URL.createObjectURL(file);
+    setLastFrameSrc(src);
+    loadImage(src, setBgImage);
+  };
+
+  // Remove the background from the last-picked frame so you sit on top of the
+  // chosen backdrop. Runs fully in the browser (no key, no upload).
+  const cutMeOut = async () => {
+    if (!lastFrameSrc) { setCutError('Pick a frame or upload a photo first.'); return; }
+    setCutBusy(true);
+    setCutError('');
+    try {
+      const blob = await removeBackground(lastFrameSrc);
+      loadImage(URL.createObjectURL(blob), setSubjectImage);
+    } catch (e) {
+      setCutError('Cut-out failed — try a clearer frame with the subject in view.');
+    } finally {
+      setCutBusy(false);
+    }
   };
 
   const grabFromVideo = () => {
@@ -248,7 +296,7 @@ export default function CoverStudio({ result, onClose }) {
     const c = document.createElement('canvas');
     c.width = dims.w;
     c.height = dims.h;
-    drawCoverScene(c.getContext('2d'), bgImage, texts, dims.w, dims.h);
+    drawCoverScene(c.getContext('2d'), bgImage, subject, texts, dims.w, dims.h);
     const base = (filename || 'video').replace(/\.[^.]+$/, '');
     const a = document.createElement('a');
     a.href = c.toDataURL('image/png');
@@ -290,6 +338,7 @@ export default function CoverStudio({ result, onClose }) {
         <div style={{ flex: 1, display: 'flex', padding: 16, minWidth: 0 }}>
           <CoverStage
             bgImage={bgImage}
+            subject={subject}
             dims={dims}
             texts={texts}
             selectedId={selectedId}
@@ -394,6 +443,41 @@ export default function CoverStudio({ result, onClose }) {
               Generates a backdrop, then place your photo/text on top. Tip: keep “no people, no text” so there’s room for you.
             </div>
             {aiError && <div style={{ fontSize: 12, color: '#FF4444', marginTop: 6, lineHeight: 1.4 }}>{aiError}</div>}
+          </div>
+
+          {/* SUBJECT — in-browser cut-out (background removal) */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', color: '#666', textTransform: 'uppercase', marginBottom: 8 }}>
+              Subject (cut-out)
+            </div>
+            <button
+              onClick={cutMeOut}
+              disabled={cutBusy}
+              style={{ width: '100%', background: '#1A1A1A', border: '1px solid #333', color: '#FFF', fontSize: 13, fontWeight: 600, padding: '9px', borderRadius: 8, cursor: cutBusy ? 'not-allowed' : 'pointer', opacity: cutBusy ? 0.7 : 1 }}
+            >
+              {cutBusy ? 'Cutting out…' : '✂️ Cut me out of the frame'}
+            </button>
+            <div style={{ fontSize: 10, color: '#555', marginTop: 6, lineHeight: 1.4 }}>
+              Removes the background from the last frame you picked, so you sit on top of the AI backdrop. First run downloads a small model.
+            </div>
+            {cutError && <div style={{ fontSize: 12, color: '#FF4444', marginTop: 6 }}>{cutError}</div>}
+
+            {subjectImage && (
+              <div style={{ marginTop: 10 }}>
+                <label style={{ fontSize: 10, color: '#666', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Size</label>
+                <input type="range" min={0.3} max={1.6} step={0.01} value={subjScale} onChange={(e) => setSubjScale(Number(e.target.value))} style={{ width: '100%', accentColor: '#E60306' }} />
+                <label style={{ fontSize: 10, color: '#666', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Left / right</label>
+                <input type="range" min={0} max={1} step={0.01} value={subjX} onChange={(e) => setSubjX(Number(e.target.value))} style={{ width: '100%', accentColor: '#E60306' }} />
+                <label style={{ fontSize: 10, color: '#666', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Up / down</label>
+                <input type="range" min={0} max={1} step={0.01} value={subjY} onChange={(e) => setSubjY(Number(e.target.value))} style={{ width: '100%', accentColor: '#E60306' }} />
+                <button
+                  onClick={() => setSubjectImage(null)}
+                  style={{ marginTop: 6, background: 'transparent', border: '1px solid #333', color: '#888', fontSize: 11, padding: '5px 10px', borderRadius: 6, cursor: 'pointer' }}
+                >
+                  Remove cut-out
+                </button>
+              </div>
+            )}
           </div>
 
           <div style={{ borderTop: '1px solid #1A1A1A', margin: '16px 0' }} />

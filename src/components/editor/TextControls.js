@@ -1,7 +1,15 @@
 import React, { useRef } from 'react';
 
 const SWATCHES = ['#FFFFFF', '#E60306', '#000000', '#FFC107'];
-const FONTS = ['Bebas Neue', 'DM Sans', 'Arial'];
+const FONTS = ['Anton', 'Bebas Neue', 'DM Sans', 'Arial'];
+
+// One-tap looks matching the bold TikTok-cover style. Each patches the selected text.
+const STYLE_PRESETS = [
+  { label: 'Bold White', patch: { font: 'Anton', weight: 400, color: '#FFFFFF', bg: null, outline: { color: '#000000', width: 0.14 } } },
+  { label: 'Red Bar', patch: { font: 'Anton', weight: 400, color: '#FFFFFF', bg: '#E60306', bgOpacity: 1, outline: null } },
+  { label: 'Red Text', patch: { font: 'Anton', weight: 400, color: '#E60306', bg: null, outline: { color: '#000000', width: 0.16 } } },
+  { label: 'Black Bar', patch: { font: 'Anton', weight: 400, color: '#FFFFFF', bg: '#000000', bgOpacity: 0.9, outline: null } },
+];
 
 // Dual-thumb slider for a text element's on-screen time window. `end == null`
 // means "until the end". Writes { start, end } via onChange.
@@ -202,6 +210,31 @@ export default function TextControls({ texts, selectedId, duration, currentTime,
                 fontFamily: 'inherit',
               }}
             />
+          </div>
+
+          <div style={rowStyle}>
+            <label style={labelStyle}>Quick styles</label>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {STYLE_PRESETS.map((p) => (
+                <button
+                  key={p.label}
+                  onClick={() => onChange(selected.id, p.patch)}
+                  style={{
+                    background: p.patch.bg || (p.patch.color === '#E60306' ? '#0A0A0A' : '#0A0A0A'),
+                    border: `1px solid ${p.patch.bg === '#E60306' || p.patch.color === '#E60306' ? '#E60306' : '#2A2A2A'}`,
+                    color: p.patch.bg ? '#FFF' : p.patch.color,
+                    fontFamily: "'Anton', sans-serif",
+                    fontSize: 12,
+                    letterSpacing: '0.04em',
+                    padding: '5px 10px',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div style={{ ...rowStyle, display: 'flex', gap: 10 }}>
