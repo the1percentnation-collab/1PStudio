@@ -65,6 +65,11 @@
         "region": "us-central1"
       },
       {
+        "source": "/api/media",
+        "function": "mediaProxy",
+        "region": "us-central1"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

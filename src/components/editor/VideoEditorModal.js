@@ -29,33 +29,14 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec, onWordsR
     return base.crop ? base : { ...base, crop: { x: 0, y: 0, w: 1, h: 1 } };
   });
   const [words, setWords] = useState(result.words || []);
-  // Library items only have a remote (Firebase Storage) URL. Fetch it into a
-  // local blob so the canvas preview AND the export/bake work without CORS
-  // tainting. Composer items are already blob: URLs and pass straight through.
-  const isBlob = !!result.videoUrl && result.videoUrl.startsWith('blob:');
-  const [sourceUrl, setSourceUrl] = useState(isBlob ? result.videoUrl : null);
-  const [srcError, setSrcError] = useState('');
-  useEffect(() => {
-    if (isBlob || !result.videoUrl) return;
-    let alive = true;
-    let created = null;
-    (async () => {
-      try {
-        const res = await fetch(result.videoUrl);
-        if (!res.ok) throw new Error(`Could not load video (${res.status})`);
-        const blob = await res.blob();
-        if (!alive) return;
-        created = URL.createObjectURL(blob);
-        setSourceUrl(created);
-      } catch (e) {
-        if (!alive) return;
-        // fall back to the remote URL: preview works, export may be blocked
-        setSourceUrl(result.videoUrl);
-        setSrcError('Loaded from a hosted copy — if export fails, enable CORS on the Storage bucket.');
-      }
-    })();
-    return () => { alive = false; if (created) URL.revokeObjectURL(created); };
-  }, [result.videoUrl, isBlob]);
+  // Composer items are blob: URLs (same-origin). Library items are remote
+  // Firebase Storage URLs — route those through our same-origin media proxy so
+  // the canvas preview AND export/bake work without any bucket CORS policy.
+  const sourceUrl = !result.videoUrl
+    ? null
+    : result.videoUrl.startsWith('blob:')
+      ? result.videoUrl
+      : `/api/media?url=${encodeURIComponent(result.videoUrl)}`;
   const [selectedTextId, setSelectedTextId] = useState(spec.texts[0]?.id || null);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
@@ -228,12 +209,6 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec, onWordsR
           ✕
         </button>
       </div>
-
-      {srcError && (
-        <div style={{ padding: '6px 20px', background: '#FBBF2411', borderBottom: '1px solid #3A3015', color: '#D9B65A', fontSize: 11, flexShrink: 0 }}>
-          {srcError}
-        </div>
-      )}
 
       {/* STAGE + CONTROLS */}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>

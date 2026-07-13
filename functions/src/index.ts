@@ -6,8 +6,41 @@ import { spawn } from "child_process";
 import { promises as fs } from "fs";
 import * as os from "os";
 import * as path from "path";
+import { Readable } from "stream";
 
 initializeApp();
+
+// ---------------------------------------------------------------------------
+// Media proxy — streams a Firebase Storage download URL back through this same
+// origin so the browser editor can read/export it without a bucket CORS policy.
+// Restricted to this project's Storage URLs to avoid being an open proxy.
+// ---------------------------------------------------------------------------
+export const mediaProxy = onRequest(
+  { cors: true, timeoutSeconds: 300, memory: "512MiB" },
+  async (req, res) => {
+    const url = (req.query.url as string) || "";
+    if (!/^https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/[^/]+\/o\//.test(url)) {
+      res.status(400).send("Only this project's Storage URLs are allowed.");
+      return;
+    }
+    try {
+      const upstream = await fetch(url);
+      if (!upstream.ok || !upstream.body) {
+        res.status(upstream.status || 502).send("Could not fetch media.");
+        return;
+      }
+      res.set("Content-Type", upstream.headers.get("content-type") || "application/octet-stream");
+      res.set("Access-Control-Allow-Origin", "*");
+      res.set("Cache-Control", "private, max-age=600");
+      const len = upstream.headers.get("content-length");
+      if (len) res.set("Content-Length", len);
+      // stream the body through (no full-buffer, so large videos are fine)
+      Readable.fromWeb(upstream.body as unknown as Parameters<typeof Readable.fromWeb>[0]).pipe(res);
+    } catch (e) {
+      res.status(502).send("Proxy error.");
+    }
+  }
+);
 
 const SYSTEM_PROMPT = `You are a TikTok content strategist for The One Percent Nation, a self-help and leadership coaching brand. The creator is Anthony Brown, a Black male leader, real estate broker turned full-time entrepreneur, faith-adjacent, direct communicator, Oklahoma-based. His content pillars are: limiting beliefs, self-accountability, identity and mindset, leadership and purpose. His hook style: second-person identity challenges, truth bombs, direct confrontation of excuses.
 
