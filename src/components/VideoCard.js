@@ -320,7 +320,7 @@ function TranscriptPanel({ onRegenerate, isRegenerating, initialTranscript }) {
   );
 }
 
-export default function VideoCard({ result, onRegenerate, onRemove, onPublished, onEdit, autoOpenPublish, overrideVideoFile }) {
+export default function VideoCard({ result, onRegenerate, onRemove, onPublished, onEdit, onMakeCover, autoOpenPublish, overrideVideoFile }) {
   const { id, filename, frames, content, error, _file, videoUrl, transcript } = result;
   const [isRegenerating, setIsRegenerating] = useState(false);
   const pillarColor = content ? (PILLAR_COLORS[content.content_pillar] || '#888') : '#888';
@@ -524,6 +524,27 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished,
             onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#333')}
           >
             ✂️ Edit Video
+          </button>
+        )}
+
+        {content && onMakeCover && (
+          <button
+            onClick={() => onMakeCover(id)}
+            style={{
+              background: '#1A1A1A',
+              color: '#FFF',
+              fontSize: 13,
+              fontWeight: 600,
+              padding: '8px 16px',
+              borderRadius: 8,
+              border: '1px solid #333',
+              cursor: 'pointer',
+              transition: 'border-color 0.2s',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#E60306')}
+            onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#333')}
+          >
+            🖼 Make Cover
           </button>
         )}
 

@@ -117,7 +117,7 @@ function Toggle({ label, on, onChange }) {
   );
 }
 
-export default function TextControls({ texts, selectedId, duration, currentTime, onChange, onAdd, onRemove, onSelect }) {
+export default function TextControls({ texts, selectedId, duration, currentTime, hideTiming, onChange, onAdd, onRemove, onSelect }) {
   const selected = texts.find((t) => t.id === selectedId) || null;
 
   return (
@@ -286,6 +286,7 @@ export default function TextControls({ texts, selectedId, duration, currentTime,
             />
           </div>
 
+          {!hideTiming && (
           <div style={rowStyle}>
             <label style={labelStyle}>Timing (drag to set when it shows)</label>
             <TimingSlider
@@ -296,7 +297,9 @@ export default function TextControls({ texts, selectedId, duration, currentTime,
               onChange={(patch) => onChange(selected.id, patch)}
             />
           </div>
+          )}
 
+          {!hideTiming && (
           <div style={{ ...rowStyle, display: 'flex', gap: 10 }}>
             <div style={{ flex: 1 }}>
               <label style={labelStyle}>Show from (s)</label>
@@ -340,6 +343,7 @@ export default function TextControls({ texts, selectedId, duration, currentTime,
               />
             </div>
           </div>
+          )}
 
           <button
             onClick={() => onRemove(selected.id)}

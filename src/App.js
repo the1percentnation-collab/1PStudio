@@ -12,6 +12,7 @@ import QueueProgress from './components/QueueProgress';
 import LibraryView from './components/LibraryView';
 import { generateTikTokContent } from './services/claudeService';
 import VideoEditorModal from './components/editor/VideoEditorModal';
+import CoverStudio from './components/cover/CoverStudio';
 
 const LIBRARY_KEY = '1p-studio-library';
 const POSTS_KEY = '1p-studio-posts';
@@ -203,7 +204,11 @@ export default function App() {
   // pre-loaded with an edited (baked) video file from the editor
   const [publishFor, setPublishFor] = useState(null); // { id, file }
 
+  const [coverId, setCoverId] = useState(null);
+  const coverResult = results.find((r) => r.id === coverId) || null;
+
   const handleEdit = useCallback((id) => setEditingId(id), []);
+  const handleMakeCover = useCallback((id) => setCoverId(id), []);
 
   const handleSaveSpec = useCallback((id, spec) => {
     setResults((prev) => prev.map((r) => (r.id === id ? { ...r, overlaySpec: spec } : r)));
@@ -289,6 +294,7 @@ export default function App() {
                 onRemove={handleRemove}
                 onPublished={handlePublished}
                 onEdit={handleEdit}
+                onMakeCover={handleMakeCover}
                 autoOpenPublish={publishFor?.id === result.id}
                 overrideVideoFile={publishFor?.id === result.id ? publishFor.file : null}
               />
@@ -350,6 +356,10 @@ export default function App() {
           onWordsResolved={handleWordsResolved}
           onContinueToPost={handleContinueToPost}
         />
+      )}
+
+      {coverResult && (
+        <CoverStudio result={coverResult} onClose={() => setCoverId(null)} />
       )}
     </div>
   );
