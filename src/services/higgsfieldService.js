@@ -48,6 +48,47 @@ export async function pollVideoStatus(requestId, { onTick, intervalMs = 8000, ti
   }
 }
 
+// ---- AI cover backgrounds (Higgsfield Soul, text-to-image) ----------------
+
+// Start an AI cover-background generation. { prompt, aspect } -> { requestId }
+export async function generateCoverImage(prompt, aspect) {
+  const res = await fetch('/api/cover-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, aspect }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Generation failed (${res.status})`);
+  return data;
+}
+
+async function checkCoverImage(requestId) {
+  const res = await fetch('/api/cover-image-status', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requestId }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Status check failed (${res.status})`);
+  return data;
+}
+
+// Polls until the cover image is ready. Resolves with { dataUrl }.
+export async function pollCoverImage(requestId, { onTick, intervalMs = 5000, timeoutMs = 5 * 60 * 1000 } = {}) {
+  const start = Date.now();
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const data = await checkCoverImage(requestId);
+    if (data.status === 'ready') return data;
+    if (['failed', 'nsfw', 'canceled'].includes(data.status)) {
+      throw new Error(data.error || `Generation ${data.status}.`);
+    }
+    if (Date.now() - start > timeoutMs) throw new Error('Timed out generating the image. Try again.');
+    if (onTick) onTick(Math.round((Date.now() - start) / 1000));
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
 // Import an existing video/image by URL. -> { videoUrl, mediaType }
 export async function importVideo(url) {
   const res = await fetch('/api/import', {

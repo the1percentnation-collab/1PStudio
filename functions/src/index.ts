@@ -891,3 +891,128 @@ export const importVideo = onRequest(
     }
   }
 );
+
+// ---------------------------------------------------------------------------
+// AI cover backgrounds — Higgsfield Soul (text-to-image, /v1/text2image/soul).
+// Same credentials + submit/poll pattern as the video endpoints. Used by the
+// Cover Studio to generate a dramatic backdrop from a prompt; the completed
+// image is returned as a base64 data URL so the cover canvas can composite and
+// export it without CORS tainting.
+// ---------------------------------------------------------------------------
+
+// Cover aspect -> nearest Soul size preset.
+const SOUL_SIZE: Record<string, string> = {
+  "9:16": "PORTRAIT_1536x2048",
+  "4:5": "PORTRAIT_1536x2048",
+  "1:1": "SQUARE_1536x1536",
+  "16:9": "LANDSCAPE_2048x1536",
+};
+
+export const generateCoverImage = onRequest(
+  {
+    cors: true,
+    secrets: ["HIGGSFIELD_CREDENTIALS"],
+    timeoutSeconds: 120,
+    memory: "256MiB",
+  },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+    const credentials = process.env.HIGGSFIELD_CREDENTIALS;
+    if (!credentials) {
+      res.status(500).json({ error: "HIGGSFIELD_CREDENTIALS is not configured on the server." });
+      return;
+    }
+    const { prompt, aspect } = (req.body ?? {}) as { prompt?: string; aspect?: string };
+    if (!prompt?.trim()) {
+      res.status(400).json({ error: "A prompt is required." });
+      return;
+    }
+    const input = {
+      prompt: prompt.trim(),
+      width_and_height: SOUL_SIZE[aspect || "9:16"] || "PORTRAIT_1536x2048",
+      quality: "HD",
+      batch_size: "SINGLE",
+      enhance_prompt: true,
+    };
+    try {
+      const r = await fetch(`${HIGGSFIELD_BASE}/v1/text2image/soul`, {
+        method: "POST",
+        headers: { Authorization: `Key ${credentials}`, "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const data = (await r.json().catch(() => ({}))) as { request_id?: string; id?: string; detail?: string; message?: string };
+      if (!r.ok) {
+        res.status(r.status).json({ error: data.detail || data.message || `Higgsfield error ${r.status}`, details: data });
+        return;
+      }
+      const requestId = data.request_id || data.id;
+      if (!requestId) {
+        res.status(502).json({ error: "Higgsfield did not return a request id.", details: data });
+        return;
+      }
+      res.json({ status: "ok", requestId });
+    } catch (e) {
+      res.status(502).json({ error: `Failed to reach Higgsfield: ${e instanceof Error ? e.message : "unknown error"}` });
+    }
+  }
+);
+
+export const coverImageStatus = onRequest(
+  {
+    cors: true,
+    secrets: ["HIGGSFIELD_CREDENTIALS"],
+    timeoutSeconds: 120,
+    memory: "512MiB",
+  },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+    const credentials = process.env.HIGGSFIELD_CREDENTIALS;
+    if (!credentials) {
+      res.status(500).json({ error: "HIGGSFIELD_CREDENTIALS is not configured on the server." });
+      return;
+    }
+    const { requestId } = (req.body ?? {}) as { requestId?: string };
+    if (!requestId) {
+      res.status(400).json({ error: "requestId is required." });
+      return;
+    }
+    try {
+      const r = await fetch(`${HIGGSFIELD_BASE}/requests/${requestId}/status`, {
+        headers: { Authorization: `Key ${credentials}` },
+      });
+      const data = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!r.ok) {
+        res.status(r.status).json({ error: (data.detail as string) || (data.message as string) || `Higgsfield error ${r.status}` });
+        return;
+      }
+      const status = (data.status as string) || "in_progress";
+      if (status !== "completed") {
+        const pending = status === "queued" || status === "in_progress";
+        res.json({ status: pending ? "generating" : status });
+        return;
+      }
+      const urls = higgsfieldResultUrls(data);
+      if (!urls.length) {
+        res.json({ status: "failed", error: "Completed but no image was returned." });
+        return;
+      }
+      // Return the image inline as a data URL — keeps the cover canvas CORS-clean.
+      const imgRes = await fetch(urls[0]);
+      if (!imgRes.ok) {
+        res.status(502).json({ error: `Could not download the generated image (${imgRes.status}).` });
+        return;
+      }
+      const ct = imgRes.headers.get("content-type") || "image/jpeg";
+      const buf = Buffer.from(await imgRes.arrayBuffer());
+      res.json({ status: "ready", dataUrl: `data:${ct};base64,${buf.toString("base64")}` });
+    } catch (e) {
+      res.status(502).json({ error: e instanceof Error ? e.message : "Status check failed." });
+    }
+  }
+);

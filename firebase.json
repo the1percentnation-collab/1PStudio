@@ -55,6 +55,16 @@
         "region": "us-central1"
       },
       {
+        "source": "/api/cover-image",
+        "function": "generateCoverImage",
+        "region": "us-central1"
+      },
+      {
+        "source": "/api/cover-image-status",
+        "function": "coverImageStatus",
+        "region": "us-central1"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

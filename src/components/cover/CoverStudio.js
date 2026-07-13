@@ -1,6 +1,10 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { drawOverlays, getTextBounds, ensureFontsLoaded, makeTextElement } from '../../services/overlayRenderer';
 import TextControls from '../editor/TextControls';
+import { generateCoverImage, pollCoverImage } from '../../services/higgsfieldService';
+
+const DEFAULT_AI_PROMPT =
+  'Dark cinematic poster background, dramatic storm clouds and red embers, moody volumetric lighting, smoke, high contrast, gritty texture, empty space for a subject, no people, no text';
 
 // Cover output resolutions per aspect (portrait-first for short-form content).
 const ASPECTS = {
@@ -163,6 +167,12 @@ export default function CoverStudio({ result, onClose }) {
   const [vidDuration, setVidDuration] = useState(0);
   const hiddenVideoRef = useRef(null);
 
+  // AI background (Higgsfield Soul)
+  const [aiPrompt, setAiPrompt] = useState(DEFAULT_AI_PROMPT);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiMsg, setAiMsg] = useState('');
+  const [aiError, setAiError] = useState('');
+
   const dims = ASPECTS[aspect];
 
   // default background = the hook frame if we have one
@@ -212,6 +222,25 @@ export default function CoverStudio({ result, onClose }) {
     };
     v.addEventListener('seeked', onSeeked);
     v.currentTime = Math.min(grabTime, (v.duration || 0) - 0.05);
+  };
+
+  const generateAiBackground = async () => {
+    if (!aiPrompt.trim()) { setAiError('Enter a prompt.'); return; }
+    setAiBusy(true);
+    setAiError('');
+    setAiMsg('Submitting…');
+    try {
+      const { requestId } = await generateCoverImage(aiPrompt.trim(), aspect);
+      setAiMsg('Generating…');
+      const { dataUrl } = await pollCoverImage(requestId, { onTick: (s) => setAiMsg(`Generating… ${s}s`) });
+      loadImage(dataUrl, setBgImage);
+      setAiMsg('');
+    } catch (e) {
+      setAiError(e.message || 'Generation failed.');
+      setAiMsg('');
+    } finally {
+      setAiBusy(false);
+    }
   };
 
   const download = async () => {
@@ -340,6 +369,31 @@ export default function CoverStudio({ result, onClose }) {
               Upload image
               <input type="file" accept="image/*" onChange={onUpload} style={{ display: 'none' }} />
             </label>
+          </div>
+
+          {/* AI BACKGROUND — Higgsfield Soul */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', color: '#666', textTransform: 'uppercase', marginBottom: 8 }}>
+              AI Background
+            </div>
+            <textarea
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              rows={4}
+              placeholder="Describe the backdrop…"
+              style={{ width: '100%', background: '#0A0A0A', border: '1px solid #2A2A2A', borderRadius: 8, color: '#DDD', fontSize: 12, lineHeight: 1.4, padding: '8px 10px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit', marginBottom: 8 }}
+            />
+            <button
+              onClick={generateAiBackground}
+              disabled={aiBusy}
+              style={{ width: '100%', background: '#E60306', color: '#FFF', fontSize: 13, fontWeight: 700, padding: '9px', borderRadius: 8, border: 'none', cursor: aiBusy ? 'not-allowed' : 'pointer', opacity: aiBusy ? 0.7 : 1 }}
+            >
+              {aiBusy ? (aiMsg || 'Working…') : '✨ Generate background'}
+            </button>
+            <div style={{ fontSize: 10, color: '#555', marginTop: 6, lineHeight: 1.4 }}>
+              Generates a backdrop, then place your photo/text on top. Tip: keep “no people, no text” so there’s room for you.
+            </div>
+            {aiError && <div style={{ fontSize: 12, color: '#FF4444', marginTop: 6, lineHeight: 1.4 }}>{aiError}</div>}
           </div>
 
           <div style={{ borderTop: '1px solid #1A1A1A', margin: '16px 0' }} />
