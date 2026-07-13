@@ -3,7 +3,7 @@
 // The video is uploaded DIRECTLY from the browser to Firebase Storage (no
 // Cloud Function size cap, so long videos work — limited only by each
 // platform's own ceiling), then the resulting URL is handed to the
-// Ayrshare-backed publishPost function which posts to every platform.
+// Zernio-backed publishPost function which posts to every platform.
 //
 // platforms is an array of: 'tiktok' | 'instagram' | 'youtube' | 'facebook' | 'x' | 'linkedin'
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
@@ -45,7 +45,7 @@ export async function uploadVideo(videoFile, onProgress) {
   return getDownloadURL(task.snapshot.ref);
 }
 
-// Fetches which social accounts are connected in Ayrshare.
+// Fetches which social accounts are connected in Zernio.
 export async function getConnectedAccounts() {
   const response = await fetch('/api/accounts');
   const data = await response.json().catch(() => ({}));
