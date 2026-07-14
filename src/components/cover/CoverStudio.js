@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { drawOverlays, getTextBounds, ensureFontsLoaded, makeTextElement } from '../../services/overlayRenderer';
 import TextControls from '../editor/TextControls';
-import { generateCoverImage, pollCoverImage } from '../../services/higgsfieldService';
+import { generateCoverImage, pollCoverImage, generateFreeCoverImage } from '../../services/higgsfieldService';
 import { removeBackground } from '@imgly/background-removal';
 
 const DEFAULT_AI_PROMPT =
@@ -179,6 +179,7 @@ export default function CoverStudio({ result, onClose }) {
 
   // AI background (Higgsfield Soul)
   const [aiPrompt, setAiPrompt] = useState(DEFAULT_AI_PROMPT);
+  const [aiEngine, setAiEngine] = useState('free'); // 'free' (Pollinations) | 'higgsfield'
   const [aiBusy, setAiBusy] = useState(false);
   const [aiMsg, setAiMsg] = useState('');
   const [aiError, setAiError] = useState('');
@@ -276,11 +277,15 @@ export default function CoverStudio({ result, onClose }) {
     if (!aiPrompt.trim()) { setAiError('Enter a prompt.'); return; }
     setAiBusy(true);
     setAiError('');
-    setAiMsg('Submitting…');
+    setAiMsg('Generating…');
     try {
-      const { requestId } = await generateCoverImage(aiPrompt.trim(), aspect);
-      setAiMsg('Generating…');
-      const { dataUrl } = await pollCoverImage(requestId, { onTick: (s) => setAiMsg(`Generating… ${s}s`) });
+      let dataUrl;
+      if (aiEngine === 'free') {
+        ({ dataUrl } = await generateFreeCoverImage(aiPrompt.trim(), aspect));
+      } else {
+        const { requestId } = await generateCoverImage(aiPrompt.trim(), aspect);
+        ({ dataUrl } = await pollCoverImage(requestId, { onTick: (s) => setAiMsg(`Generating… ${s}s`) }));
+      }
       loadImage(dataUrl, setBgImage);
       setAiMsg('');
     } catch (e) {
@@ -424,6 +429,26 @@ export default function CoverStudio({ result, onClose }) {
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', color: '#666', textTransform: 'uppercase', marginBottom: 8 }}>
               AI Background
+            </div>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+              {[{ k: 'free', label: 'Free' }, { k: 'higgsfield', label: 'Higgsfield (credits)' }].map((o) => (
+                <button
+                  key={o.k}
+                  onClick={() => setAiEngine(o.k)}
+                  style={{
+                    flex: 1,
+                    background: aiEngine === o.k ? '#E6030622' : '#0A0A0A',
+                    border: `1px solid ${aiEngine === o.k ? '#E60306' : '#2A2A2A'}`,
+                    color: aiEngine === o.k ? '#FFF' : '#999',
+                    fontSize: 11,
+                    padding: '6px',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {o.label}
+                </button>
+              ))}
             </div>
             <textarea
               value={aiPrompt}

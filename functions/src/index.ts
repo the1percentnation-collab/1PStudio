@@ -1074,3 +1074,51 @@ export const coverImageStatus = onRequest(
     }
   }
 );
+
+// ---------------------------------------------------------------------------
+// FREE AI cover backgrounds — Pollinations.ai (no key, no credits). Returns the
+// image inline as a base64 data URL, same contract as coverImageStatus's ready
+// response, so the Cover Studio can composite + export it.
+// ---------------------------------------------------------------------------
+const POLLINATIONS_SIZE: Record<string, { w: number; h: number }> = {
+  "9:16": { w: 1152, h: 2048 },
+  "4:5": { w: 1638, h: 2048 },
+  "1:1": { w: 1536, h: 1536 },
+  "16:9": { w: 2048, h: 1152 },
+};
+
+export const coverImageFree = onRequest(
+  { cors: true, timeoutSeconds: 120, memory: "512MiB" },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+    const { prompt, aspect } = (req.body ?? {}) as { prompt?: string; aspect?: string };
+    if (!prompt?.trim()) {
+      res.status(400).json({ error: "A prompt is required." });
+      return;
+    }
+    const size = POLLINATIONS_SIZE[aspect || "9:16"] || POLLINATIONS_SIZE["9:16"];
+    const seed = Math.floor(Math.random() * 1e9);
+    const url =
+      `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.trim())}` +
+      `?width=${size.w}&height=${size.h}&nologo=true&model=flux&seed=${seed}`;
+    try {
+      const r = await fetch(url);
+      if (!r.ok) {
+        res.status(502).json({ error: `Free image service error (${r.status}). Try again.` });
+        return;
+      }
+      const ct = r.headers.get("content-type") || "image/jpeg";
+      if (!ct.startsWith("image")) {
+        res.status(502).json({ error: "Free image service is busy — try again in a moment." });
+        return;
+      }
+      const buf = Buffer.from(await r.arrayBuffer());
+      res.json({ status: "ready", dataUrl: `data:${ct};base64,${buf.toString("base64")}` });
+    } catch (e) {
+      res.status(502).json({ error: `Free image service failed: ${e instanceof Error ? e.message : "unknown error"}` });
+    }
+  }
+);

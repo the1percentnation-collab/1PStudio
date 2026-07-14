@@ -70,6 +70,18 @@ export async function generateCoverImage(prompt, aspect) {
   return data;
 }
 
+// Free AI cover background via Pollinations (no key/credits). -> { dataUrl }
+export async function generateFreeCoverImage(prompt, aspect) {
+  const res = await fetch('/api/cover-image-free', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, aspect }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(errText(data, res, `Generation failed (${res.status})`));
+  return data;
+}
+
 async function checkCoverImage(requestId) {
   const res = await fetch('/api/cover-image-status', {
     method: 'POST',
