@@ -43,6 +43,7 @@ export default function VideoEditorModal({ result, isMobile, onClose, onSaveSpec
   const [playing, setPlaying] = useState(false);
   const [videoDims, setVideoDims] = useState(null);
   const [cropMode, setCropMode] = useState(false);
+  const [mobileTab, setMobileTab] = useState('text'); // mobile: which tool group is shown
   const [continuing, setContinuing] = useState(false);
   const [continueProgress, setContinueProgress] = useState(0);
   const [exportState, setExportState] = useState({ status: 'idle', progress: 0, url: null, ext: null, error: null });
@@ -212,7 +213,7 @@ export default function VideoEditorModal({ result, isMobile, onClose, onSaveSpec
 
       {/* STAGE + CONTROLS */}
       <div style={{ flex: 1, display: 'flex', flexDirection: isMobile ? 'column' : 'row', minHeight: 0 }}>
-        <div style={{ flex: isMobile ? 'none' : 1, height: isMobile ? '38vh' : 'auto', display: 'flex', padding: isMobile ? 10 : 16, minWidth: 0 }}>
+        <div style={{ flex: isMobile ? 'none' : 1, height: isMobile ? '48vh' : 'auto', display: 'flex', padding: isMobile ? 8 : 16, minWidth: 0 }}>
           {sourceUrl ? (
           <EditorStage
             videoUrl={sourceUrl}
@@ -248,32 +249,62 @@ export default function VideoEditorModal({ result, isMobile, onClose, onSaveSpec
             boxSizing: 'border-box',
           }}
         >
-          <TextControls
-            texts={spec.texts}
-            selectedId={selectedTextId}
-            duration={duration}
-            currentTime={currentTime}
-            onChange={patchText}
-            onAdd={addText}
-            onRemove={removeText}
-            onSelect={setSelectedTextId}
-          />
-          <div style={{ borderTop: '1px solid #1A1A1A', margin: '18px 0' }} />
-          <CropControls
-            crop={spec.crop}
-            sourceDims={videoDims}
-            cropMode={cropMode}
-            onSetCrop={(c) => { setCrop(c); }}
-            onToggleCropMode={setCropMode}
-          />
-          <div style={{ borderTop: '1px solid #1A1A1A', margin: '18px 0' }} />
-          <CaptionControls
-            captions={spec.captions}
-            hasWords={hasWords}
-            canGenerate={!!result._file}
-            onGenerate={handleGenerateCaptions}
-            onChange={patchCaptions}
-          />
+          {isMobile && (
+            <div style={{ display: 'flex', gap: 6, marginBottom: 14, position: 'sticky', top: -14, background: '#111', paddingTop: 4, paddingBottom: 8, zIndex: 2 }}>
+              {[{ k: 'text', label: 'Text' }, { k: 'crop', label: 'Crop' }, { k: 'captions', label: 'Captions' }].map((t) => (
+                <button
+                  key={t.k}
+                  onClick={() => { setMobileTab(t.k); if (t.k !== 'crop') setCropMode(false); }}
+                  style={{
+                    flex: 1,
+                    background: mobileTab === t.k ? '#E60306' : '#0A0A0A',
+                    border: `1px solid ${mobileTab === t.k ? '#E60306' : '#2A2A2A'}`,
+                    color: mobileTab === t.k ? '#FFF' : '#999',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    padding: '9px',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {(!isMobile || mobileTab === 'text') && (
+            <TextControls
+              texts={spec.texts}
+              selectedId={selectedTextId}
+              duration={duration}
+              currentTime={currentTime}
+              onChange={patchText}
+              onAdd={addText}
+              onRemove={removeText}
+              onSelect={setSelectedTextId}
+            />
+          )}
+          {!isMobile && <div style={{ borderTop: '1px solid #1A1A1A', margin: '18px 0' }} />}
+          {(!isMobile || mobileTab === 'crop') && (
+            <CropControls
+              crop={spec.crop}
+              sourceDims={videoDims}
+              cropMode={cropMode}
+              onSetCrop={(c) => { setCrop(c); }}
+              onToggleCropMode={setCropMode}
+            />
+          )}
+          {!isMobile && <div style={{ borderTop: '1px solid #1A1A1A', margin: '18px 0' }} />}
+          {(!isMobile || mobileTab === 'captions') && (
+            <CaptionControls
+              captions={spec.captions}
+              hasWords={hasWords}
+              canGenerate={!!result._file}
+              onGenerate={handleGenerateCaptions}
+              onChange={patchCaptions}
+            />
+          )}
         </div>
       </div>
 
