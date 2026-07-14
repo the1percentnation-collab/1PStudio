@@ -843,10 +843,11 @@ export const generateVideo = onRequest(
       : { prompt: prompt?.trim(), aspect_ratio: "9:16" };
 
     try {
+      // Native /v1 API wraps generation params in a "params" object (same as Soul).
       const r = await fetch(`${HIGGSFIELD_BASE}${modelPath}`, {
         method: "POST",
         headers: { Authorization: `Key ${credentials}`, "Content-Type": "application/json" },
-        body: JSON.stringify(input),
+        body: JSON.stringify({ params: input }),
       });
       const data = (await r.json().catch(() => ({}))) as { request_id?: string; id?: string; detail?: string; message?: string };
       if (!r.ok) {
