@@ -57,8 +57,15 @@ Return ONLY valid JSON with no markdown, no backticks, no preamble. Fields:
 - caption (string): full TikTok caption including opening line, body, and soft CTA — 150-300 chars
 - hashtags (string): 12-15 hashtags, mix of niche, broad, and trending — space-separated
 - content_pillar (string): one of "Self-Sabotage & Limiting Beliefs", "Accountability & Execution", "Identity & Mindset Shift", "Leadership & Purpose"
-- hook_score (number 1-10): how strong the opening hook is
-- hook_score_reason (string): one sentence explaining the score and one concrete tip to improve it
+- hook_opening (string): the exact first 1-2 spoken sentences from the transcript that act as the hook — quote them verbatim. If no transcript is available, briefly describe the opening visual instead.
+- hook_dimensions (object): score the HOOK (only those opening seconds), judged strictly on the actual wording, each an integer 1-10:
+    - curiosity: does it open a loop / raise a question the viewer needs answered
+    - specificity: a concrete, specific, high-stakes claim vs vague or generic
+    - callout: directly speaks to the viewer's identity or pain ("you", a named struggle) vs talking at no one
+    - boldness: contrarian, surprising, or pattern-interrupting vs an expected/safe opener
+    - clarity: gets to the point immediately vs throat-clearing, filler, or setup before the payoff
+- hook_score (number 1-10): the average of the five hook_dimensions, rounded
+- hook_score_reason (string): one sentence naming the single weakest dimension, plus a concrete rewrite of the opening line that would raise it
 - titles (array of 3 strings): alternate video title options, each a different angle
 - transcript_summary (string): 1-2 sentence summary of what the video is about (derive from transcript if provided, otherwise from frames)`;
 
@@ -121,6 +128,7 @@ export const analyzeVideo = onRequest(
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 1800,
+        temperature: 0, // reproducible scoring
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: contentBlocks }],
       }),
@@ -144,6 +152,18 @@ export const analyzeVideo = onRequest(
       return;
     }
 
+    // Compute the hook score from the rubric dimensions so it's deterministic
+    // and grounded in the per-dimension judgments (not a single gestalt guess).
+    const dims = (parsed.hook_dimensions ?? {}) as Record<string, unknown>;
+    const dimKeys = ["curiosity", "specificity", "callout", "boldness", "clarity"];
+    const dimVals = dimKeys
+      .map((k) => Number(dims[k]))
+      .filter((n) => Number.isFinite(n) && n >= 1 && n <= 10);
+    let hookScore = typeof parsed.hook_score === "number" ? parsed.hook_score : 5;
+    if (dimVals.length) {
+      hookScore = Math.max(1, Math.min(10, Math.round(dimVals.reduce((a, b) => a + b, 0) / dimVals.length)));
+    }
+
     res.json({
       best_title: parsed.best_title ?? "",
       on_screen_text: parsed.on_screen_text ?? "",
@@ -155,8 +175,10 @@ export const analyzeVideo = onRequest(
       caption: parsed.caption ?? "",
       hashtags: parsed.hashtags ?? "",
       content_pillar: parsed.content_pillar ?? "Identity & Mindset Shift",
-      hook_score: typeof parsed.hook_score === "number" ? parsed.hook_score : 5,
+      hook_score: hookScore,
       hook_score_reason: parsed.hook_score_reason ?? "",
+      hook_opening: parsed.hook_opening ?? "",
+      hook_dimensions: parsed.hook_dimensions ?? null,
       titles: Array.isArray(parsed.titles) ? parsed.titles : [],
       transcript_summary: parsed.transcript_summary ?? "",
     });

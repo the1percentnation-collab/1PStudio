@@ -449,6 +449,19 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished,
           <ContentField label="CAPTION" value={content.caption} />
           <ContentField label="HASHTAGS" value={content.hashtags} />
 
+          {content.hook_dimensions && (
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
+              {['curiosity', 'specificity', 'callout', 'boldness', 'clarity'].map((k) =>
+                content.hook_dimensions[k] != null ? (
+                  <span key={k} style={{ fontSize: 11, color: '#999' }}>
+                    <span style={{ color: '#555', textTransform: 'capitalize' }}>{k}</span>{' '}
+                    <span style={{ color: hookScoreColor(content.hook_dimensions[k]), fontWeight: 700 }}>{content.hook_dimensions[k]}</span>
+                  </span>
+                ) : null
+              )}
+            </div>
+          )}
+
           {content.hook_score_reason && (
             <div style={{
               background: '#0A0A0A',
