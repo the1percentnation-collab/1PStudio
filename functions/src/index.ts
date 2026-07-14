@@ -162,6 +162,9 @@ interface PublishBody {
   title?: string;
   platforms?: string[];
   scheduleDate?: string;
+  // Whether the media is a video. Defaults to true (existing video flow).
+  // Photo posts pass false so Ayrshare treats the media as an image.
+  isVideo?: boolean;
 }
 
 export const publishPost = onRequest(
@@ -182,7 +185,11 @@ export const publishPost = onRequest(
       return;
     }
 
-    const { mediaUrl, post, title: rawTitle, platforms: rawPlatforms, scheduleDate } = (req.body ?? {}) as PublishBody;
+    const { mediaUrl, post, title: rawTitle, platforms: rawPlatforms, scheduleDate, isVideo: rawIsVideo } = (req.body ?? {}) as PublishBody;
+
+    // Default to a video post so the existing video flow is unchanged; photo
+    // posts explicitly send isVideo: false.
+    const isVideo = rawIsVideo !== false;
 
     const requested = (rawPlatforms ?? []).map((p) => p.toLowerCase());
     const platforms = Array.from(
@@ -193,8 +200,13 @@ export const publishPost = onRequest(
       res.status(400).json({ error: "Select at least one supported platform to post to." });
       return;
     }
+    // YouTube only accepts video uploads; reject photo posts targeting it.
+    if (!isVideo && platforms.includes("youtube")) {
+      res.status(400).json({ error: "YouTube only supports video posts — deselect it for a photo post." });
+      return;
+    }
     if (!mediaUrl || !/^https?:\/\//.test(mediaUrl)) {
-      res.status(400).json({ error: "A valid video URL is required (upload the video first)." });
+      res.status(400).json({ error: `A valid ${isVideo ? "video" : "image"} URL is required (upload the ${isVideo ? "video" : "photo"} first).` });
       return;
     }
 
@@ -210,14 +222,15 @@ export const publishPost = onRequest(
       post: postText,
       platforms,
       mediaUrls: [mediaUrl],
-      isVideo: true,
+      isVideo,
     };
 
-    if (platforms.includes("youtube")) {
+    if (isVideo && platforms.includes("youtube")) {
       body.youTubeOptions = { title, visibility: "public" };
     }
-    if (platforms.includes("instagram")) {
-      // Video posts to Instagram publish as Reels.
+    if (isVideo && platforms.includes("instagram")) {
+      // Video posts to Instagram publish as Reels; photo posts publish as
+      // a standard image feed post (no reels flag).
       body.instagramOptions = { reels: true };
     }
 

@@ -15,6 +15,13 @@ const ICONS = {
       <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
     </>
   ),
+  photo: (
+    <>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <path d="M21 15l-5-5L5 21" />
+    </>
+  ),
   captions: (
     <>
       <rect x="3" y="5" width="18" height="14" rx="2" />
@@ -73,6 +80,7 @@ function Icon({ name }) {
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
   { id: 'composer', label: 'Composer', icon: 'composer' },
+  { id: 'photo', label: 'Photo Post', icon: 'photo' },
   { id: 'captions', label: 'Captions', icon: 'captions' },
   { id: 'calendar', label: 'Calendar', icon: 'calendar' },
   { id: 'analytics', label: 'Analytics', icon: 'analytics' },
