@@ -956,12 +956,12 @@ export const importVideo = onRequest(
 // export it without CORS tainting.
 // ---------------------------------------------------------------------------
 
-// Cover aspect -> nearest Soul size preset.
+// Cover aspect -> nearest Soul size (raw WxH strings the API accepts).
 const SOUL_SIZE: Record<string, string> = {
-  "9:16": "PORTRAIT_1536x2048",
-  "4:5": "PORTRAIT_1536x2048",
-  "1:1": "SQUARE_1536x1536",
-  "16:9": "LANDSCAPE_2048x1536",
+  "9:16": "1152x2048",
+  "4:5": "1632x2048",
+  "1:1": "1536x1536",
+  "16:9": "2048x1152",
 };
 
 export const generateCoverImage = onRequest(
@@ -989,9 +989,9 @@ export const generateCoverImage = onRequest(
     // Native /v1 API wraps generation params in a "params" object.
     const params = {
       prompt: prompt.trim(),
-      width_and_height: SOUL_SIZE[aspect || "9:16"] || "PORTRAIT_1536x2048",
-      quality: "HD",
-      batch_size: "SINGLE",
+      width_and_height: SOUL_SIZE[aspect || "9:16"] || "1152x2048",
+      quality: "1080p",
+      batch_size: 1,
       enhance_prompt: true,
     };
     try {
