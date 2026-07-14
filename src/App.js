@@ -5,6 +5,7 @@ import CalendarView from './components/CalendarView';
 import Analytics from './components/Analytics';
 import AccountsView from './components/AccountsView';
 import CaptionsView from './components/CaptionsView';
+import PhotoComposer from './components/PhotoComposer';
 import DropZone from './components/DropZone';
 import VideoCard from './components/VideoCard';
 import QueueProgress from './components/QueueProgress';
@@ -38,6 +39,7 @@ function saveJSON(key, items) {
 const VIEW_META = {
   dashboard: { title: 'Dashboard', subtitle: 'Your content at a glance' },
   composer: { title: 'Composer', subtitle: 'Generate and publish content' },
+  photo: { title: 'Photo Post', subtitle: 'Publish a photo + caption to all channels' },
   captions: { title: 'Captions', subtitle: 'Auto burned-in subtitles' },
   calendar: { title: 'Content Calendar', subtitle: 'Scheduled & published posts' },
   analytics: { title: 'Analytics', subtitle: 'Performance & content insights' },
@@ -197,7 +199,7 @@ export default function App() {
 
   const isQueueActive = queue.some((i) => i.status === 'waiting' || i.status === 'processing');
   const meta = VIEW_META[view];
-  const contentMax = view === 'composer' ? 860 : 1120;
+  const contentMax = view === 'composer' || view === 'photo' ? 860 : 1120;
 
   const renderView = () => {
     if (view === 'dashboard') {
@@ -208,6 +210,9 @@ export default function App() {
     }
     if (view === 'captions') {
       return <CaptionsView />;
+    }
+    if (view === 'photo') {
+      return <PhotoComposer onPublished={handlePublished} />;
     }
     if (view === 'analytics') {
       return <Analytics library={library} posts={posts} />;

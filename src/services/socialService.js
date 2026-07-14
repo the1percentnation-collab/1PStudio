@@ -18,15 +18,25 @@ export const SOCIAL_PLATFORMS = [
   { id: 'linkedin', label: 'LinkedIn' },
 ];
 
-// Uploads the video to Storage and returns a public download URL.
-// onProgress receives a 0..1 fraction.
-export async function uploadVideo(videoFile, onProgress) {
+// Channels that accept a photo (image) post. YouTube is video-only, so it is
+// excluded here even though it appears in SOCIAL_PLATFORMS for video posts.
+export const PHOTO_PLATFORMS = [
+  { id: 'tiktok', label: 'TikTok' },
+  { id: 'instagram', label: 'Instagram' },
+  { id: 'facebook', label: 'Facebook' },
+  { id: 'x', label: 'X' },
+  { id: 'linkedin', label: 'LinkedIn' },
+];
+
+// Uploads a media file (video or image) to Storage and returns a public
+// download URL. onProgress receives a 0..1 fraction.
+export async function uploadMedia(mediaFile, onProgress) {
   await ensureAuth();
 
-  const safeName = videoFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const safeName = mediaFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
   const path = `social-posts/${Date.now()}-${safeName}`;
-  const task = uploadBytesResumable(ref(storage, path), videoFile, {
-    contentType: videoFile.type || 'video/mp4',
+  const task = uploadBytesResumable(ref(storage, path), mediaFile, {
+    contentType: mediaFile.type || 'application/octet-stream',
   });
 
   await new Promise((resolve, reject) => {
@@ -44,6 +54,9 @@ export async function uploadVideo(videoFile, onProgress) {
 
   return getDownloadURL(task.snapshot.ref);
 }
+
+// Backwards-compatible alias for the video upload path.
+export const uploadVideo = uploadMedia;
 
 // Fetches which social accounts are connected in Ayrshare.
 export async function getConnectedAccounts() {
@@ -72,6 +85,38 @@ export async function publishToSocial(videoFile, { post, title, platforms, sched
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mediaUrl, post, title, platforms, scheduleDate }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.error || `Publish failed (${response.status})`);
+  }
+  return data;
+}
+
+// Publishes a photo + caption to the selected social platforms. Mirrors
+// publishToSocial but uploads an image and flags the post as a non-video so
+// Ayrshare treats the media as an image.
+export async function publishPhotoPost(imageFile, { post, title, platforms, scheduleDate, onProgress }) {
+  if (!imageFile) {
+    throw new Error('Add a photo to publish an image post.');
+  }
+  if (!imageFile.type || !imageFile.type.startsWith('image/')) {
+    throw new Error('The attached file is not an image.');
+  }
+  if (!platforms || platforms.length === 0) {
+    throw new Error('Select at least one platform to post to.');
+  }
+  if (!post || !post.trim()) {
+    throw new Error('Caption is required to publish.');
+  }
+
+  const mediaUrl = await uploadMedia(imageFile, onProgress);
+
+  const response = await fetch('/api/publish', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mediaUrl, post, title, platforms, scheduleDate, isVideo: false }),
   });
 
   const data = await response.json().catch(() => ({}));
