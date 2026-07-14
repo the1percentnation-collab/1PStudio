@@ -4,8 +4,10 @@ import TextControls from '../editor/TextControls';
 import { generateCoverImage, pollCoverImage, generateFreeCoverImage } from '../../services/higgsfieldService';
 import { removeBackground } from '@imgly/background-removal';
 
+// A concrete SCENE renders far better than a list of adjectives (the backend
+// adds the cinematic-poster styling automatically). Edit to taste.
 const DEFAULT_AI_PROMPT =
-  'Dark cinematic poster background, dramatic storm clouds and red embers, moody volumetric lighting, smoke, high contrast, gritty texture, empty space for a subject, no people, no text';
+  'A dark rain-slicked city street at night with distant neon lights, drifting fog and rising embers';
 
 // Cover output resolutions per aspect (portrait-first for short-form content).
 const ASPECTS = {
@@ -465,7 +467,7 @@ export default function CoverStudio({ result, onClose }) {
               {aiBusy ? (aiMsg || 'Working…') : '✨ Generate background'}
             </button>
             <div style={{ fontSize: 10, color: '#555', marginTop: 6, lineHeight: 1.4 }}>
-              Generates a backdrop, then place your photo/text on top. Tip: keep “no people, no text” so there’s room for you.
+              Describe a scene (e.g. “stormy city rooftop at dusk”). The cinematic poster look is added automatically. Free engine can be busy — just regenerate if it times out.
             </div>
             {aiError && <div style={{ fontSize: 12, color: '#FF4444', marginTop: 6, lineHeight: 1.4 }}>{aiError}</div>}
           </div>

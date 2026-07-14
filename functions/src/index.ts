@@ -1101,9 +1101,16 @@ export const coverImageFree = onRequest(
     }
     const size = POLLINATIONS_SIZE[aspect || "9:16"] || POLLINATIONS_SIZE["9:16"];
     const seed = Math.floor(Math.random() * 1e9);
+    // Bake a strong cinematic-poster style onto whatever scene the user typed,
+    // so even a short prompt yields a dramatic, on-brand backdrop.
+    const styled =
+      `${prompt.trim()}, cinematic movie-poster backdrop, dramatic volumetric lighting, ` +
+      `deep shadows, moody atmosphere, drifting smoke, glowing embers, teal and amber color grade, ` +
+      `high contrast, subtle film grain, shot on cinema camera, ultra detailed, sharp focus, 8k, ` +
+      `empty background with open negative space for a subject, no people, no text, no watermark`;
     const url =
-      `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt.trim())}` +
-      `?width=${size.w}&height=${size.h}&nologo=true&model=flux&seed=${seed}`;
+      `https://image.pollinations.ai/prompt/${encodeURIComponent(styled)}` +
+      `?width=${size.w}&height=${size.h}&nologo=true&enhance=true&model=flux&seed=${seed}`;
     try {
       const r = await fetch(url);
       if (!r.ok) {
