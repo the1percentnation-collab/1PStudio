@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 const PRESETS = [
   { key: 'outline', label: 'Outline', sample: { color: '#FFF', textShadow: '-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000' } },
@@ -16,7 +16,26 @@ const labelStyle = {
   marginBottom: 6,
 };
 
-export default function CaptionControls({ captions, hasWords, onChange }) {
+export default function CaptionControls({ captions, hasWords, canGenerate, onGenerate, onChange }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [error, setError] = useState('');
+
+  const handleGenerate = async () => {
+    setBusy(true);
+    setError('');
+    setMsg('Starting…');
+    try {
+      await onGenerate?.((m) => setMsg(m));
+      setMsg('');
+    } catch (e) {
+      setError(e?.message || 'Could not generate captions.');
+      setMsg('');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -42,8 +61,36 @@ export default function CaptionControls({ captions, hasWords, onChange }) {
       </div>
 
       {!hasWords && (
-        <div style={{ fontSize: 12, color: '#775500', background: '#FFC10711', border: '1px solid #FFC10733', borderRadius: 8, padding: '8px 10px', marginBottom: 14, lineHeight: 1.5 }}>
-          No word timings for this video — synced captions unavailable. Transcription may be off (Deepgram not configured) or it failed for this upload; try Regenerate on the card.
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, color: '#775500', background: '#FFC10711', border: '1px solid #FFC10733', borderRadius: 8, padding: '8px 10px', lineHeight: 1.5 }}>
+            No word timings yet — synced captions need transcription first.
+          </div>
+          {canGenerate ? (
+            <button
+              onClick={handleGenerate}
+              disabled={busy}
+              style={{
+                marginTop: 10,
+                width: '100%',
+                background: '#E60306',
+                color: '#FFF',
+                fontSize: 13,
+                fontWeight: 700,
+                padding: '9px 12px',
+                borderRadius: 8,
+                border: 'none',
+                cursor: busy ? 'not-allowed' : 'pointer',
+                opacity: busy ? 0.7 : 1,
+              }}
+            >
+              {busy ? (msg || 'Working…') : 'Generate captions'}
+            </button>
+          ) : (
+            <div style={{ marginTop: 8, fontSize: 11, color: '#666' }}>
+              Re-upload this video from the Composer to generate captions.
+            </div>
+          )}
+          {error && <div style={{ marginTop: 8, fontSize: 12, color: '#FF4444', lineHeight: 1.4 }}>{error}</div>}
         </div>
       )}
 

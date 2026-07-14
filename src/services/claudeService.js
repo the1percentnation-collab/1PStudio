@@ -1,8 +1,9 @@
 import { uploadVideo } from './socialService';
 
-// Transcribes an uploaded video via the Deepgram-backed function. Returns
-// { text, words } where words is [{ w, s, e }] (word, start/end seconds) —
-// empty when transcription isn't configured/available. The word timings
+// Transcribes an already-uploaded video URL via the Deepgram-backed function.
+// Returns { text, words, configured } where words is [{ w, s, e }] (word,
+// start/end seconds) — empty when transcription isn't configured/available.
+// `configured` is false when the server has no Deepgram key. The word timings
 // drive the synced-caption editor.
 async function transcribeVideo(mediaUrl) {
   const res = await fetch('/api/transcribe', {
@@ -15,7 +16,30 @@ async function transcribeVideo(mediaUrl) {
   return {
     text: (data.transcript || '').trim(),
     words: Array.isArray(data.words) ? data.words : [],
+    configured: data.configured !== false,
   };
+}
+
+// Uploads a video File and transcribes it — used by the editor's "Generate
+// captions" retry. Returns { text, words, configured }. Throws with a clear
+// message when Deepgram isn't configured so the UI can explain it.
+export async function transcribeUploadedFile(videoFile, onProgress) {
+  const mediaUrl = await uploadVideo(videoFile, (p) =>
+    onProgress?.(`Uploading… ${Math.round(p * 100)}%`)
+  );
+  onProgress?.('Transcribing…');
+  const t = await transcribeVideo(mediaUrl);
+  if (!t.configured) {
+    const err = new Error('Transcription isn’t configured on the server (Deepgram key missing).');
+    err.code = 'NOT_CONFIGURED';
+    throw err;
+  }
+  if (!t.words.length) {
+    const err = new Error('No speech was detected in this video, so there are no captions to sync.');
+    err.code = 'NO_SPEECH';
+    throw err;
+  }
+  return t;
 }
 
 function extractFrameAt(video, pct) {
@@ -85,21 +109,29 @@ export async function generateTikTokContent(videoFile, onProgress, transcript = 
   // Best-effort: any failure falls back to frame-only analysis.
   let finalTranscript = (transcript || '').trim();
   let words = [];
+  // durable Storage URL of the uploaded video — lets the Library re-post later
+  let uploadedUrl = null;
+  // 'skipped' when a manual transcript was supplied; otherwise reflects the
+  // transcription attempt so the editor can explain missing captions.
+  let captionsStatus = finalTranscript ? 'skipped' : 'ok';
   if (!finalTranscript) {
     try {
-      const mediaUrl = await uploadVideo(videoFile, (p) =>
+      uploadedUrl = await uploadVideo(videoFile, (p) =>
         onProgress(`Uploading for analysis… ${Math.round(p * 100)}%`)
       );
       onProgress('Transcribing audio…');
-      const t = await transcribeVideo(mediaUrl);
+      const t = await transcribeVideo(uploadedUrl);
       finalTranscript = t.text;
       words = t.words;
+      if (!t.configured) captionsStatus = 'not_configured';
+      else if (!t.words.length) captionsStatus = 'no_speech';
     } catch {
       /* no transcript available — fall back to frames only */
+      captionsStatus = 'failed';
     }
   }
 
-  onProgress('Analyzing with Claude...');
+  onProgress('Analyzing with 1P Studio…');
 
   const response = await fetch('/api/analyze', {
     method: 'POST',
@@ -114,5 +146,5 @@ export async function generateTikTokContent(videoFile, onProgress, transcript = 
 
   onProgress('Parsing response...');
   const content = await response.json();
-  return { content, frames, transcript: finalTranscript, words };
+  return { content, frames, transcript: finalTranscript, words, captionsStatus, mediaUrl: uploadedUrl };
 }

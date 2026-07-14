@@ -5,12 +5,14 @@ import CalendarView from './components/CalendarView';
 import Analytics from './components/Analytics';
 import AccountsView from './components/AccountsView';
 import CaptionsView from './components/CaptionsView';
+import AiVideoView from './components/AiVideoView';
 import DropZone from './components/DropZone';
 import VideoCard from './components/VideoCard';
 import QueueProgress from './components/QueueProgress';
 import LibraryView from './components/LibraryView';
 import { generateTikTokContent } from './services/claudeService';
 import VideoEditorModal from './components/editor/VideoEditorModal';
+import CoverStudio from './components/cover/CoverStudio';
 
 const LIBRARY_KEY = '1p-studio-library';
 const POSTS_KEY = '1p-studio-posts';
@@ -38,6 +40,7 @@ function saveJSON(key, items) {
 const VIEW_META = {
   dashboard: { title: 'Dashboard', subtitle: 'Your content at a glance' },
   composer: { title: 'Composer', subtitle: 'Generate and publish content' },
+  aivideo: { title: 'AI Video', subtitle: 'Generate or import clips, then post' },
   captions: { title: 'Captions', subtitle: 'Auto burned-in subtitles' },
   calendar: { title: 'Content Calendar', subtitle: 'Scheduled & published posts' },
   analytics: { title: 'Analytics', subtitle: 'Performance & content insights' },
@@ -70,6 +73,17 @@ export default function App() {
       frames: { hookFrame: entry.frames?.hookFrame ?? null },
       content: entry.content,
       transcript: entry.transcript ? entry.transcript.slice(0, 5000) : '',
+      // keep word timings so captions survive reopening (a few KB per clip)
+      words: entry.words || [],
+      captionsStatus: entry.captionsStatus || null,
+      // durable hosted video URL + which platforms it's already been shared to,
+      // so the Library can post/reshare it later
+      mediaUrl: entry.mediaUrl || null,
+      sharedPlatforms: entry.sharedPlatforms || [],
+      // saved editor overlays so a Library edit reopens where you left off
+      overlaySpec: entry.overlaySpec || null,
+      // saved cover image (thumbnail) attached to this video
+      coverUrl: entry.coverUrl || null,
       error: entry.error,
       dateAdded: Date.now(),
     };
@@ -78,6 +92,15 @@ export default function App() {
 
   const handleLibraryDelete = useCallback((id) => {
     setLibrary((prev) => prev.filter((i) => i.id !== id));
+  }, []);
+
+  // record which platforms a library item has been shared to (merge, dedupe)
+  const handleLibraryShared = useCallback((id, platforms) => {
+    setLibrary((prev) => prev.map((i) =>
+      i.id === id
+        ? { ...i, sharedPlatforms: Array.from(new Set([...(i.sharedPlatforms || []), ...platforms])) }
+        : i
+    ));
   }, []);
 
   const handlePublished = useCallback((record) => {
@@ -110,6 +133,8 @@ export default function App() {
           // word timings power the editor's synced captions; when a manual
           // transcript skips re-transcription, reuse the original timings
           words: (result.words?.length ? result.words : words) || [],
+          captionsStatus: result.captionsStatus || null,
+          mediaUrl: result.mediaUrl || null,
           overlaySpec: null,
           error: null,
         };
@@ -179,11 +204,64 @@ export default function App() {
 
   const [editingId, setEditingId] = useState(null);
   const editingResult = results.find((r) => r.id === editingId) || null;
+  // when set, the matching card auto-opens its Post to Social panel, optionally
+  // pre-loaded with an edited (baked) video file from the editor
+  const [publishFor, setPublishFor] = useState(null); // { id, file }
+
+  const [coverId, setCoverId] = useState(null);
+  const coverResult = results.find((r) => r.id === coverId) || null;
+
+  // editing a saved Library item: build a result-like object from its stored
+  // metadata + durable video URL
+  const [libEditId, setLibEditId] = useState(null);
+  const libEditItem = library.find((i) => i.id === libEditId) || null;
+  const libEditTarget = libEditItem && libEditItem.mediaUrl ? {
+    id: libEditItem.id,
+    filename: libEditItem.filename,
+    videoUrl: libEditItem.mediaUrl,
+    mediaUrl: libEditItem.mediaUrl,
+    words: libEditItem.words || [],
+    content: libEditItem.content,
+    overlaySpec: libEditItem.overlaySpec || null,
+    _file: null,
+  } : null;
+  const editorTarget = editingResult || libEditTarget;
 
   const handleEdit = useCallback((id) => setEditingId(id), []);
+  const handleEditLibrary = useCallback((id) => setLibEditId(id), []);
+  const handleMakeCover = useCallback((id) => setCoverId(id), []);
+
+  // attach a saved cover image URL to the video (kept in results + library)
+  const handleSaveCover = useCallback((id, coverUrl) => {
+    setResults((prev) => prev.map((r) => (r.id === id ? { ...r, coverUrl } : r)));
+    setLibrary((prev) => prev.map((i) => (i.id === id ? { ...i, coverUrl } : i)));
+  }, []);
+
+  const closeEditor = useCallback(() => { setEditingId(null); setLibEditId(null); }, []);
 
   const handleSaveSpec = useCallback((id, spec) => {
     setResults((prev) => prev.map((r) => (r.id === id ? { ...r, overlaySpec: spec } : r)));
+    setLibrary((prev) => prev.map((i) => (i.id === id ? { ...i, overlaySpec: spec } : i)));
+  }, []);
+
+  // editor resolved fresh word timings (via "Generate captions") — persist them
+  const handleWordsResolved = useCallback((id, words) => {
+    setResults((prev) => prev.map((r) => (r.id === id ? { ...r, words, captionsStatus: 'ok' } : r)));
+    setLibrary((prev) => prev.map((i) => (i.id === id ? { ...i, words } : i)));
+  }, []);
+
+  // editor's "Continue to Post": close the editor and open the card's publish
+  // panel, pre-loaded with the baked (edited) file when one was produced
+  const handleContinueToPost = useCallback((id, file) => {
+    setEditingId(null);
+    setLibEditId(null);
+    // route to whichever surface holds this item
+    setResults((prev) => {
+      const inResults = prev.some((r) => r.id === id);
+      setView(inResults ? 'composer' : 'library');
+      return prev;
+    });
+    setPublishFor({ id, file: file || null });
   }, []);
 
   const handleRemove = useCallback((id) => {
@@ -209,11 +287,24 @@ export default function App() {
     if (view === 'captions') {
       return <CaptionsView />;
     }
+    if (view === 'aivideo') {
+      return <AiVideoView />;
+    }
     if (view === 'analytics') {
       return <Analytics library={library} posts={posts} />;
     }
     if (view === 'library') {
-      return <LibraryView library={library} onDelete={handleLibraryDelete} />;
+      return (
+        <LibraryView
+          library={library}
+          onDelete={handleLibraryDelete}
+          onShared={handleLibraryShared}
+          onPublished={handlePublished}
+          onEditLibrary={handleEditLibrary}
+          autoOpenId={publishFor?.id}
+          overrideFile={publishFor?.file}
+        />
+      );
     }
     if (view === 'accounts') {
       return <AccountsView />;
@@ -242,6 +333,9 @@ export default function App() {
                 onRemove={handleRemove}
                 onPublished={handlePublished}
                 onEdit={handleEdit}
+                onMakeCover={handleMakeCover}
+                autoOpenPublish={publishFor?.id === result.id}
+                overrideVideoFile={publishFor?.id === result.id ? publishFor.file : null}
               />
             ))}
           </div>
@@ -293,12 +387,20 @@ export default function App() {
       </div>
 
       {/* full-screen editor — zIndex above Sidebar (200) and top bar (100) */}
-      {editingResult && (
+      {editorTarget && (
         <VideoEditorModal
-          result={editingResult}
-          onClose={() => setEditingId(null)}
+          key={editorTarget.id}
+          result={editorTarget}
+          isMobile={isMobile}
+          onClose={closeEditor}
           onSaveSpec={handleSaveSpec}
+          onWordsResolved={handleWordsResolved}
+          onContinueToPost={handleContinueToPost}
         />
+      )}
+
+      {coverResult && (
+        <CoverStudio result={coverResult} isMobile={isMobile} onClose={() => setCoverId(null)} onSaveCover={handleSaveCover} />
       )}
     </div>
   );

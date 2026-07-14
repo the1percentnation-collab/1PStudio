@@ -6,8 +6,41 @@ import { spawn } from "child_process";
 import { promises as fs } from "fs";
 import * as os from "os";
 import * as path from "path";
+import { Readable } from "stream";
 
 initializeApp();
+
+// ---------------------------------------------------------------------------
+// Media proxy — streams a Firebase Storage download URL back through this same
+// origin so the browser editor can read/export it without a bucket CORS policy.
+// Restricted to this project's Storage URLs to avoid being an open proxy.
+// ---------------------------------------------------------------------------
+export const mediaProxy = onRequest(
+  { cors: true, timeoutSeconds: 300, memory: "512MiB" },
+  async (req, res) => {
+    const url = (req.query.url as string) || "";
+    if (!/^https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/[^/]+\/o\//.test(url)) {
+      res.status(400).send("Only this project's Storage URLs are allowed.");
+      return;
+    }
+    try {
+      const upstream = await fetch(url);
+      if (!upstream.ok || !upstream.body) {
+        res.status(upstream.status || 502).send("Could not fetch media.");
+        return;
+      }
+      res.set("Content-Type", upstream.headers.get("content-type") || "application/octet-stream");
+      res.set("Access-Control-Allow-Origin", "*");
+      res.set("Cache-Control", "private, max-age=600");
+      const len = upstream.headers.get("content-length");
+      if (len) res.set("Content-Length", len);
+      // stream the body through (no full-buffer, so large videos are fine)
+      Readable.fromWeb(upstream.body as unknown as Parameters<typeof Readable.fromWeb>[0]).pipe(res);
+    } catch (e) {
+      res.status(502).send("Proxy error.");
+    }
+  }
+);
 
 const SYSTEM_PROMPT = `You are a TikTok content strategist for The One Percent Nation, a self-help and leadership coaching brand. The creator is Anthony Brown, a Black male leader, real estate broker turned full-time entrepreneur, faith-adjacent, direct communicator, Oklahoma-based. His content pillars are: limiting beliefs, self-accountability, identity and mindset, leadership and purpose. His hook style: second-person identity challenges, truth bombs, direct confrontation of excuses.
 
@@ -24,8 +57,15 @@ Return ONLY valid JSON with no markdown, no backticks, no preamble. Fields:
 - caption (string): full TikTok caption including opening line, body, and soft CTA — 150-300 chars
 - hashtags (string): 12-15 hashtags, mix of niche, broad, and trending — space-separated
 - content_pillar (string): one of "Self-Sabotage & Limiting Beliefs", "Accountability & Execution", "Identity & Mindset Shift", "Leadership & Purpose"
-- hook_score (number 1-10): how strong the opening hook is
-- hook_score_reason (string): one sentence explaining the score and one concrete tip to improve it
+- hook_opening (string): the exact first 1-2 spoken sentences from the transcript that act as the hook — quote them verbatim. If no transcript is available, briefly describe the opening visual instead.
+- hook_dimensions (object): score the HOOK (only those opening seconds), judged strictly on the actual wording, each an integer 1-10:
+    - curiosity: does it open a loop / raise a question the viewer needs answered
+    - specificity: a concrete, specific, high-stakes claim vs vague or generic
+    - callout: directly speaks to the viewer's identity or pain ("you", a named struggle) vs talking at no one
+    - boldness: contrarian, surprising, or pattern-interrupting vs an expected/safe opener
+    - clarity: gets to the point immediately vs throat-clearing, filler, or setup before the payoff
+- hook_score (number 1-10): the average of the five hook_dimensions, rounded
+- hook_score_reason (string): one sentence naming the single weakest dimension, plus a concrete rewrite of the opening line that would raise it
 - titles (array of 3 strings): alternate video title options, each a different angle
 - transcript_summary (string): 1-2 sentence summary of what the video is about (derive from transcript if provided, otherwise from frames)`;
 
@@ -88,6 +128,7 @@ export const analyzeVideo = onRequest(
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 1800,
+        temperature: 0, // reproducible scoring
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: contentBlocks }],
       }),
@@ -111,6 +152,18 @@ export const analyzeVideo = onRequest(
       return;
     }
 
+    // Compute the hook score from the rubric dimensions so it's deterministic
+    // and grounded in the per-dimension judgments (not a single gestalt guess).
+    const dims = (parsed.hook_dimensions ?? {}) as Record<string, unknown>;
+    const dimKeys = ["curiosity", "specificity", "callout", "boldness", "clarity"];
+    const dimVals = dimKeys
+      .map((k) => Number(dims[k]))
+      .filter((n) => Number.isFinite(n) && n >= 1 && n <= 10);
+    let hookScore = typeof parsed.hook_score === "number" ? parsed.hook_score : 5;
+    if (dimVals.length) {
+      hookScore = Math.max(1, Math.min(10, Math.round(dimVals.reduce((a, b) => a + b, 0) / dimVals.length)));
+    }
+
     res.json({
       best_title: parsed.best_title ?? "",
       on_screen_text: parsed.on_screen_text ?? "",
@@ -122,8 +175,10 @@ export const analyzeVideo = onRequest(
       caption: parsed.caption ?? "",
       hashtags: parsed.hashtags ?? "",
       content_pillar: parsed.content_pillar ?? "Identity & Mindset Shift",
-      hook_score: typeof parsed.hook_score === "number" ? parsed.hook_score : 5,
+      hook_score: hookScore,
       hook_score_reason: parsed.hook_score_reason ?? "",
+      hook_opening: parsed.hook_opening ?? "",
+      hook_dimensions: parsed.hook_dimensions ?? null,
       titles: Array.isArray(parsed.titles) ? parsed.titles : [],
       transcript_summary: parsed.transcript_summary ?? "",
     });
@@ -131,22 +186,30 @@ export const analyzeVideo = onRequest(
 );
 
 // ---------------------------------------------------------------------------
-// Social publishing via Ayrshare
+// Social publishing via Zernio
 //
-// Ayrshare is a single API that fans a post out to every connected social
-// account (TikTok, Instagram Reels, YouTube Shorts, Facebook, X, LinkedIn).
-// You connect each platform once inside the Ayrshare dashboard; this function
-// only needs the Ayrshare API key (set as the AYRSHARE_API_KEY env var / secret).
+// Zernio (formerly Late / getlate.dev) is a single API that fans a post out to
+// every connected social account (TikTok, Instagram Reels, YouTube Shorts,
+// Facebook, X, LinkedIn). You connect each platform once in the Zernio
+// dashboard; this function only needs the Zernio API key (Secret Manager
+// secret ZERNIO_API_KEY, bound below).
+//
+// Zernio replaces Ayrshare specifically because it supports video on every
+// plan — Ayrshare gated video behind "Premium or Business Plan", which is the
+// error this fixes. The first two connected accounts are free.
 //
 // Flow: the browser uploads the video DIRECTLY to Firebase Storage (no size
 // cap from this function) and POSTs the resulting download URL + caption +
-// selected platforms here as JSON. We hand that URL to Ayrshare's /post
-// endpoint, which pulls the video and posts it to every platform. No
-// per-platform OAuth or app review is needed on our side.
+// selected platforms here as JSON. We look up the caller's connected Zernio
+// accounts to resolve an accountId per platform, then create one post that
+// Zernio publishes to every selected platform. No per-platform OAuth or app
+// review is needed on our side.
 // ---------------------------------------------------------------------------
 
-// Ayrshare's platform identifiers. Note: X is "twitter" in Ayrshare's API.
-const AYRSHARE_PLATFORMS: Record<string, string> = {
+const ZERNIO_BASE = "https://zernio.com/api/v1";
+
+// App platform id -> Zernio platform name. Note: X is "twitter" in Zernio.
+const TO_ZERNIO: Record<string, string> = {
   tiktok: "tiktok",
   instagram: "instagram",
   youtube: "youtube",
@@ -155,6 +218,45 @@ const AYRSHARE_PLATFORMS: Record<string, string> = {
   twitter: "twitter",
   linkedin: "linkedin",
 };
+
+// Map Zernio platform names back to our app's ids (twitter -> x).
+const FROM_ZERNIO: Record<string, string> = {
+  tiktok: "tiktok",
+  instagram: "instagram",
+  youtube: "youtube",
+  facebook: "facebook",
+  twitter: "x",
+  linkedin: "linkedin",
+};
+
+interface ZernioAccount {
+  _id?: string;
+  accountId?: string;
+  id?: string;
+  platform?: string;
+  username?: string;
+  name?: string;
+}
+
+// Fetch the connected Zernio accounts. Returns [] on any non-OK response.
+async function fetchZernioAccounts(apiKey: string): Promise<ZernioAccount[]> {
+  const r = await fetch(`${ZERNIO_BASE}/accounts`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  const data = (await r.json().catch(() => ({}))) as
+    | { accounts?: ZernioAccount[]; data?: ZernioAccount[] }
+    | ZernioAccount[];
+  if (!r.ok) {
+    const msg = (data as { message?: string; error?: string })?.message ||
+      (data as { error?: string })?.error ||
+      `Zernio error ${r.status}`;
+    throw new Error(msg);
+  }
+  if (Array.isArray(data)) return data;
+  return data.accounts || data.data || [];
+}
+
+const accountIdOf = (a: ZernioAccount): string | undefined => a._id || a.accountId || a.id;
 
 interface PublishBody {
   mediaUrl?: string;
@@ -167,6 +269,7 @@ interface PublishBody {
 export const publishPost = onRequest(
   {
     cors: true,
+    secrets: ["ZERNIO_API_KEY"],
     timeoutSeconds: 120,
     memory: "256MiB",
   },
@@ -176,20 +279,16 @@ export const publishPost = onRequest(
       return;
     }
 
-    const apiKey = process.env.AYRSHARE_API_KEY;
+    const apiKey = process.env.ZERNIO_API_KEY;
     if (!apiKey) {
-      res.status(500).json({ error: "AYRSHARE_API_KEY is not configured on the server." });
+      res.status(500).json({ error: "ZERNIO_API_KEY is not configured on the server." });
       return;
     }
 
     const { mediaUrl, post, title: rawTitle, platforms: rawPlatforms, scheduleDate } = (req.body ?? {}) as PublishBody;
 
-    const requested = (rawPlatforms ?? []).map((p) => p.toLowerCase());
-    const platforms = Array.from(
-      new Set(requested.map((p) => AYRSHARE_PLATFORMS[p]).filter(Boolean))
-    );
-
-    if (platforms.length === 0) {
+    const requested = Array.from(new Set((rawPlatforms ?? []).map((p) => p.toLowerCase())));
+    if (requested.length === 0) {
       res.status(400).json({ error: "Select at least one supported platform to post to." });
       return;
     }
@@ -204,31 +303,75 @@ export const publishPost = onRequest(
       return;
     }
 
-    // Build the Ayrshare request, including platform-specific options.
+    // Resolve each selected platform to a connected Zernio accountId.
+    let accounts: ZernioAccount[];
+    try {
+      accounts = await fetchZernioAccounts(apiKey);
+    } catch (e) {
+      res.status(502).json({ error: `Couldn't reach Zernio to load your accounts: ${e instanceof Error ? e.message : "unknown error"}` });
+      return;
+    }
+    const idByPlatform: Record<string, string> = {};
+    for (const a of accounts) {
+      const id = accountIdOf(a);
+      if (a.platform && id) idByPlatform[a.platform] = id;
+    }
+
     const title = (rawTitle ?? postText).slice(0, 99);
+    const zPlatforms: Array<Record<string, unknown>> = [];
+    const notConnected: string[] = [];
+
+    for (const appId of requested) {
+      const platform = TO_ZERNIO[appId];
+      if (!platform) continue; // ignore unknown ids
+      const accountId = idByPlatform[platform];
+      if (!accountId) {
+        notConnected.push(appId);
+        continue;
+      }
+      const entry: Record<string, unknown> = { platform, accountId };
+      if (platform === "youtube") {
+        entry.platformSpecificData = { title, visibility: "public" };
+      } else if (platform === "tiktok") {
+        entry.platformSpecificData = {
+          privacyLevel: "PUBLIC_TO_EVERYONE",
+          allowComment: true,
+          allowDuet: true,
+          allowStitch: true,
+          contentPreviewConfirmed: true,
+          expressConsentGiven: true,
+        };
+      }
+      // Instagram video posts publish as Reels by default — no extra data needed.
+      zPlatforms.push(entry);
+    }
+
+    if (zPlatforms.length === 0) {
+      const which = notConnected.join(", ");
+      res.status(400).json({
+        error: which
+          ? `These platforms aren't connected in Zernio yet: ${which}. Connect them at zernio.com/dashboard, then try again.`
+          : "Select at least one supported platform to post to.",
+      });
+      return;
+    }
+
     const body: Record<string, unknown> = {
-      post: postText,
-      platforms,
-      mediaUrls: [mediaUrl],
-      isVideo: true,
+      content: postText,
+      platforms: zPlatforms,
+      mediaItems: [{ type: "video", url: mediaUrl }],
     };
 
-    if (platforms.includes("youtube")) {
-      body.youTubeOptions = { title, visibility: "public" };
-    }
-    if (platforms.includes("instagram")) {
-      // Video posts to Instagram publish as Reels.
-      body.instagramOptions = { reels: true };
-    }
-
-    // Optional scheduling — Ayrshare accepts an ISO 8601 UTC date in the future.
+    // Optional scheduling — Zernio accepts an ISO 8601 timestamp; otherwise publish now.
     if (scheduleDate && !Number.isNaN(Date.parse(scheduleDate))) {
-      body.scheduleDate = new Date(scheduleDate).toISOString();
+      body.scheduledFor = new Date(scheduleDate).toISOString();
+    } else {
+      body.publishNow = true;
     }
 
     // Fan the post out.
     try {
-      const ayrRes = await fetch("https://api.ayrshare.com/api/post", {
+      const zRes = await fetch(`${ZERNIO_BASE}/posts`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -237,81 +380,69 @@ export const publishPost = onRequest(
         body: JSON.stringify(body),
       });
 
-      const result = await ayrRes.json().catch(() => ({}));
-      if (!ayrRes.ok) {
-        // Surface Ayrshare's real reason — it may be a top-level message, a
-        // per-platform errors array, or a bare status. Don't hide it behind 403.
+      const result = await zRes.json().catch(() => ({}));
+      if (!zRes.ok) {
         const r = result as {
           message?: string;
+          error?: string;
           errors?: { message?: string; platform?: string }[];
-          posts?: { status?: string; errors?: { message?: string }[]; platform?: string }[];
         };
         const detail =
           r.message ||
+          r.error ||
           r.errors?.map((e) => `${e.platform ? e.platform + ": " : ""}${e.message}`).join("; ") ||
-          r.posts?.flatMap((p) => (p.errors ?? []).map((e) => `${p.platform ? p.platform + ": " : ""}${e.message}`)).join("; ") ||
-          `Ayrshare error ${ayrRes.status}`;
-        res.status(ayrRes.status).json({ error: detail, details: result });
+          `Zernio error ${zRes.status}`;
+        res.status(zRes.status).json({ error: detail, details: result });
         return;
       }
 
-      res.json({ status: "ok", mediaUrl, ayrshare: result });
+      res.json({
+        status: "ok",
+        mediaUrl,
+        zernio: result,
+        ...(notConnected.length ? { warning: `Skipped (not connected in Zernio): ${notConnected.join(", ")}` } : {}),
+      });
     } catch (e) {
-      res.status(502).json({ error: `Failed to reach Ayrshare: ${e instanceof Error ? e.message : "unknown error"}` });
+      res.status(502).json({ error: `Failed to reach Zernio: ${e instanceof Error ? e.message : "unknown error"}` });
     }
   }
 );
 
 // ---------------------------------------------------------------------------
-// Connected-account status — reads which social accounts are linked in
-// Ayrshare so the app can show live connection state. Accounts are linked in
-// the Ayrshare dashboard; this just reports their status.
+// Connected-account status — reads which social accounts are linked in Zernio
+// so the app can show live connection state. Accounts are linked in the Zernio
+// dashboard; this just reports their status.
 // ---------------------------------------------------------------------------
-
-// Map Ayrshare platform ids back to our app's ids (X is "twitter" in Ayrshare).
-const FROM_AYRSHARE: Record<string, string> = {
-  tiktok: "tiktok",
-  instagram: "instagram",
-  youtube: "youtube",
-  facebook: "facebook",
-  twitter: "x",
-  linkedin: "linkedin",
-};
 
 export const accountsStatus = onRequest(
   {
     cors: true,
+    secrets: ["ZERNIO_API_KEY"],
     timeoutSeconds: 30,
     memory: "256MiB",
   },
   async (_req, res) => {
-    const apiKey = process.env.AYRSHARE_API_KEY;
+    const apiKey = process.env.ZERNIO_API_KEY;
     if (!apiKey) {
       res.status(200).json({ configured: false, connected: [], displayNames: [] });
       return;
     }
 
     try {
-      const ayrRes = await fetch("https://api.ayrshare.com/api/user", {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      });
-      const data = (await ayrRes.json().catch(() => ({}))) as {
-        activeSocialAccounts?: string[];
-        displayNames?: { platform?: string; displayName?: string }[];
-      };
-
-      if (!ayrRes.ok) {
-        res.status(200).json({ configured: true, connected: [], displayNames: [], error: `Ayrshare error ${ayrRes.status}` });
-        return;
-      }
-
+      const accounts = await fetchZernioAccounts(apiKey);
       const connected = Array.from(
-        new Set((data.activeSocialAccounts ?? []).map((p) => FROM_AYRSHARE[p] ?? p))
+        new Set(
+          accounts
+            .map((a) => (a.platform ? FROM_ZERNIO[a.platform] ?? a.platform : null))
+            .filter((p): p is string => Boolean(p))
+        )
       );
-      const displayNames = (data.displayNames ?? []).map((d) => ({
-        platform: FROM_AYRSHARE[d.platform ?? ""] ?? d.platform,
-        displayName: d.displayName,
-      }));
+      const displayNames = accounts
+        .filter((a) => a.platform)
+        .map((a) => ({
+          platform: FROM_ZERNIO[a.platform as string] ?? a.platform,
+          displayName: a.username || a.name || "",
+        }));
 
       res.json({ configured: true, connected, displayNames });
     } catch (e) {
@@ -454,6 +585,7 @@ async function probeDimensions(file: string): Promise<{ width: number; height: n
 export const captionVideo = onRequest(
   {
     cors: true,
+    secrets: ["DEEPGRAM_API_KEY"],
     timeoutSeconds: 540,
     memory: "2GiB",
   },
@@ -557,6 +689,7 @@ export const captionVideo = onRequest(
 export const transcribeAudio = onRequest(
   {
     cors: true,
+    secrets: ["DEEPGRAM_API_KEY"],
     timeoutSeconds: 120,
     memory: "256MiB",
   },
@@ -604,6 +737,417 @@ export const transcribeAudio = onRequest(
       res.json({ transcript, words, configured: true });
     } catch (e) {
       res.status(502).json({ error: e instanceof Error ? e.message : "Transcription failed." });
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Higgsfield AI video — generate a clip from a prompt (and optional source
+// image) via the Higgsfield Cloud API, or import an existing video by URL.
+// Both land the finished video in Firebase Storage so it can be posted through
+// the same /api/publish (Zernio) flow.
+//
+// Auth: HIGGSFIELD_CREDENTIALS is a Secret Manager secret in the form
+// "KEY_ID:KEY_SECRET", sent as `Authorization: Key <credentials>`.
+//
+// Flow is stateless/poll-based to match the rest of this backend (no Firestore,
+// no webhooks): /api/generate submits a job and returns a requestId; the
+// browser polls /api/video-status until it's completed, at which point the
+// output video is copied into Storage and a durable URL is returned.
+// ---------------------------------------------------------------------------
+
+const HIGGSFIELD_BASE = "https://platform.higgsfield.ai";
+// Image-to-video (DoP) application path; see cloud.higgsfield.ai for the catalog.
+const HIGGSFIELD_IMAGE2VIDEO = "/v1/image2video/dop";
+
+// Turn any Higgsfield error payload into a readable string. Their validation
+// errors come back as { detail: [{ msg, loc, ... }] } or nested objects, so a
+// naive `.detail` renders as "[object Object]".
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function hfError(data: any, status: number): string {
+  const d = data?.detail ?? data?.message ?? data?.error;
+  if (typeof d === "string") return d;
+  if (Array.isArray(d)) {
+    return d
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((x: any) => {
+        if (x && x.msg) {
+          const loc = Array.isArray(x.loc) ? x.loc.filter((l: unknown) => l !== "body").join(".") : "";
+          return loc ? `${loc}: ${x.msg}` : x.msg;
+        }
+        return JSON.stringify(x);
+      })
+      .join("; ");
+  }
+  if (d) return JSON.stringify(d);
+  return `Higgsfield error ${status}`;
+}
+
+// Pull output media URLs out of a Higgsfield status payload, tolerating the
+// several shapes the API uses.
+function higgsfieldResultUrls(payload: Record<string, unknown>): string[] {
+  const urls: string[] = [];
+  const push = (v: unknown) => {
+    if (!v) return;
+    if (typeof v === "string") urls.push(v);
+    else if (typeof v === "object" && (v as { url?: string }).url) urls.push((v as { url: string }).url);
+  };
+  push((payload as { video?: unknown }).video);
+  for (const key of ["videos", "images", "results"]) {
+    const arr = (payload as Record<string, unknown>)[key];
+    if (Array.isArray(arr)) arr.forEach(push);
+  }
+  const jobs = (payload as { jobs?: unknown }).jobs;
+  if (Array.isArray(jobs)) {
+    for (const j of jobs) {
+      const results = (j as { results?: { raw?: unknown } })?.results;
+      if (results) push(results.raw ?? results);
+    }
+  }
+  return urls;
+}
+
+// Save a remote video/image into Storage with a public download token.
+async function saveToStorage(sourceUrl: string, prefix: string): Promise<{ url: string; contentType: string }> {
+  const r = await fetch(sourceUrl);
+  if (!r.ok) throw new Error(`Download failed (${r.status})`);
+  const contentType = r.headers.get("content-type") || "video/mp4";
+  const ext = contentType.includes("image") ? "jpg" : "mp4";
+  const buf = Buffer.from(await r.arrayBuffer());
+  const bucket = getStorage().bucket();
+  const token = randomUUID();
+  const objectPath = `${prefix}/${Date.now()}-${randomUUID()}.${ext}`;
+  await bucket.file(objectPath).save(buf, {
+    resumable: false,
+    metadata: { contentType, metadata: { firebaseStorageDownloadTokens: token } },
+  });
+  const url = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(objectPath)}?alt=media&token=${token}`;
+  return { url, contentType };
+}
+
+interface GenerateBody {
+  prompt?: string;
+  imageUrl?: string;
+  model?: string;
+}
+
+export const generateVideo = onRequest(
+  {
+    cors: true,
+    secrets: ["HIGGSFIELD_CREDENTIALS"],
+    timeoutSeconds: 120,
+    memory: "256MiB",
+  },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+    const credentials = process.env.HIGGSFIELD_CREDENTIALS;
+    if (!credentials) {
+      res.status(500).json({ error: "HIGGSFIELD_CREDENTIALS is not configured on the server." });
+      return;
+    }
+
+    const { prompt, imageUrl, model } = (req.body ?? {}) as GenerateBody;
+    if (!prompt?.trim() && !imageUrl?.trim()) {
+      res.status(400).json({ error: "A prompt or a source image URL is required." });
+      return;
+    }
+
+    const modelPath = model || HIGGSFIELD_IMAGE2VIDEO;
+    const input = imageUrl?.trim()
+      ? {
+          model: "dop-turbo",
+          prompt: prompt?.trim() || "",
+          input_images: [{ type: "image_url", image_url: imageUrl.trim() }],
+        }
+      : { prompt: prompt?.trim(), aspect_ratio: "9:16" };
+
+    try {
+      // Native /v1 API wraps generation params in a "params" object (same as Soul).
+      const r = await fetch(`${HIGGSFIELD_BASE}${modelPath}`, {
+        method: "POST",
+        headers: { Authorization: `Key ${credentials}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ params: input }),
+      });
+      const data = (await r.json().catch(() => ({}))) as { request_id?: string; id?: string; detail?: string; message?: string };
+      if (!r.ok) {
+        res.status(r.status).json({ error: hfError(data, r.status), details: data });
+        return;
+      }
+      const requestId = data.request_id || data.id;
+      if (!requestId) {
+        res.status(502).json({ error: "Higgsfield did not return a request id.", details: data });
+        return;
+      }
+      res.json({ status: "ok", requestId });
+    } catch (e) {
+      res.status(502).json({ error: `Failed to reach Higgsfield: ${e instanceof Error ? e.message : "unknown error"}` });
+    }
+  }
+);
+
+export const videoStatus = onRequest(
+  {
+    cors: true,
+    secrets: ["HIGGSFIELD_CREDENTIALS"],
+    timeoutSeconds: 120,
+    memory: "512MiB",
+  },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+    const credentials = process.env.HIGGSFIELD_CREDENTIALS;
+    if (!credentials) {
+      res.status(500).json({ error: "HIGGSFIELD_CREDENTIALS is not configured on the server." });
+      return;
+    }
+    const { requestId } = (req.body ?? {}) as { requestId?: string };
+    if (!requestId) {
+      res.status(400).json({ error: "requestId is required." });
+      return;
+    }
+
+    try {
+      const r = await fetch(`${HIGGSFIELD_BASE}/requests/${requestId}/status`, {
+        headers: { Authorization: `Key ${credentials}` },
+      });
+      const data = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!r.ok) {
+        res.status(r.status).json({ error: hfError(data, r.status) });
+        return;
+      }
+
+      const status = (data.status as string) || "in_progress";
+      if (status !== "completed") {
+        // queued | in_progress | failed | nsfw | canceled
+        const pending = status === "queued" || status === "in_progress";
+        res.json({ status: pending ? "generating" : status });
+        return;
+      }
+
+      const urls = higgsfieldResultUrls(data);
+      if (!urls.length) {
+        res.json({ status: "failed", error: "Completed but no output URL was returned." });
+        return;
+      }
+      const { url, contentType } = await saveToStorage(urls[0], "higgsfield");
+      res.json({ status: "ready", videoUrl: url, mediaType: contentType.includes("image") ? "image" : "video" });
+    } catch (e) {
+      res.status(502).json({ error: e instanceof Error ? e.message : "Status check failed." });
+    }
+  }
+);
+
+export const importVideo = onRequest(
+  {
+    cors: true,
+    timeoutSeconds: 300,
+    memory: "1GiB",
+  },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+    const { url } = (req.body ?? {}) as { url?: string };
+    if (!url || !/^https:\/\//.test(url)) {
+      res.status(400).json({ error: "A valid https URL is required." });
+      return;
+    }
+    try {
+      const { url: storedUrl, contentType } = await saveToStorage(url, "imported");
+      if (!/video|image|octet-stream/.test(contentType)) {
+        res.status(400).json({ error: `That URL is not a video or image (got ${contentType}).` });
+        return;
+      }
+      res.json({ status: "ok", videoUrl: storedUrl, mediaType: contentType.includes("image") ? "image" : "video" });
+    } catch (e) {
+      res.status(502).json({ error: `Import failed: ${e instanceof Error ? e.message : "unknown error"}` });
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// AI cover backgrounds — Higgsfield Soul (text-to-image, /v1/text2image/soul).
+// Same credentials + submit/poll pattern as the video endpoints. Used by the
+// Cover Studio to generate a dramatic backdrop from a prompt; the completed
+// image is returned as a base64 data URL so the cover canvas can composite and
+// export it without CORS tainting.
+// ---------------------------------------------------------------------------
+
+// Cover aspect -> nearest Soul size (raw WxH strings the API accepts).
+const SOUL_SIZE: Record<string, string> = {
+  "9:16": "1152x2048",
+  "4:5": "1632x2048",
+  "1:1": "1536x1536",
+  "16:9": "2048x1152",
+};
+
+export const generateCoverImage = onRequest(
+  {
+    cors: true,
+    secrets: ["HIGGSFIELD_CREDENTIALS"],
+    timeoutSeconds: 120,
+    memory: "256MiB",
+  },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+    const credentials = process.env.HIGGSFIELD_CREDENTIALS;
+    if (!credentials) {
+      res.status(500).json({ error: "HIGGSFIELD_CREDENTIALS is not configured on the server." });
+      return;
+    }
+    const { prompt, aspect } = (req.body ?? {}) as { prompt?: string; aspect?: string };
+    if (!prompt?.trim()) {
+      res.status(400).json({ error: "A prompt is required." });
+      return;
+    }
+    // Native /v1 API wraps generation params in a "params" object.
+    const params = {
+      prompt: prompt.trim(),
+      width_and_height: SOUL_SIZE[aspect || "9:16"] || "1152x2048",
+      quality: "1080p",
+      batch_size: 1,
+      enhance_prompt: true,
+    };
+    try {
+      const r = await fetch(`${HIGGSFIELD_BASE}/v1/text2image/soul`, {
+        method: "POST",
+        headers: { Authorization: `Key ${credentials}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ params }),
+      });
+      const data = (await r.json().catch(() => ({}))) as { request_id?: string; id?: string; detail?: string; message?: string };
+      if (!r.ok) {
+        res.status(r.status).json({ error: hfError(data, r.status), details: data });
+        return;
+      }
+      const requestId = data.request_id || data.id;
+      if (!requestId) {
+        res.status(502).json({ error: "Higgsfield did not return a request id.", details: data });
+        return;
+      }
+      res.json({ status: "ok", requestId });
+    } catch (e) {
+      res.status(502).json({ error: `Failed to reach Higgsfield: ${e instanceof Error ? e.message : "unknown error"}` });
+    }
+  }
+);
+
+export const coverImageStatus = onRequest(
+  {
+    cors: true,
+    secrets: ["HIGGSFIELD_CREDENTIALS"],
+    timeoutSeconds: 120,
+    memory: "512MiB",
+  },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+    const credentials = process.env.HIGGSFIELD_CREDENTIALS;
+    if (!credentials) {
+      res.status(500).json({ error: "HIGGSFIELD_CREDENTIALS is not configured on the server." });
+      return;
+    }
+    const { requestId } = (req.body ?? {}) as { requestId?: string };
+    if (!requestId) {
+      res.status(400).json({ error: "requestId is required." });
+      return;
+    }
+    try {
+      const r = await fetch(`${HIGGSFIELD_BASE}/requests/${requestId}/status`, {
+        headers: { Authorization: `Key ${credentials}` },
+      });
+      const data = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!r.ok) {
+        res.status(r.status).json({ error: hfError(data, r.status) });
+        return;
+      }
+      const status = (data.status as string) || "in_progress";
+      if (status !== "completed") {
+        const pending = status === "queued" || status === "in_progress";
+        res.json({ status: pending ? "generating" : status });
+        return;
+      }
+      const urls = higgsfieldResultUrls(data);
+      if (!urls.length) {
+        res.json({ status: "failed", error: "Completed but no image was returned." });
+        return;
+      }
+      // Return the image inline as a data URL — keeps the cover canvas CORS-clean.
+      const imgRes = await fetch(urls[0]);
+      if (!imgRes.ok) {
+        res.status(502).json({ error: `Could not download the generated image (${imgRes.status}).` });
+        return;
+      }
+      const ct = imgRes.headers.get("content-type") || "image/jpeg";
+      const buf = Buffer.from(await imgRes.arrayBuffer());
+      res.json({ status: "ready", dataUrl: `data:${ct};base64,${buf.toString("base64")}` });
+    } catch (e) {
+      res.status(502).json({ error: e instanceof Error ? e.message : "Status check failed." });
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// FREE AI cover backgrounds — Pollinations.ai (no key, no credits). Returns the
+// image inline as a base64 data URL, same contract as coverImageStatus's ready
+// response, so the Cover Studio can composite + export it.
+// ---------------------------------------------------------------------------
+const POLLINATIONS_SIZE: Record<string, { w: number; h: number }> = {
+  "9:16": { w: 1152, h: 2048 },
+  "4:5": { w: 1638, h: 2048 },
+  "1:1": { w: 1536, h: 1536 },
+  "16:9": { w: 2048, h: 1152 },
+};
+
+export const coverImageFree = onRequest(
+  { cors: true, timeoutSeconds: 120, memory: "512MiB" },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+    const { prompt, aspect } = (req.body ?? {}) as { prompt?: string; aspect?: string };
+    if (!prompt?.trim()) {
+      res.status(400).json({ error: "A prompt is required." });
+      return;
+    }
+    const size = POLLINATIONS_SIZE[aspect || "9:16"] || POLLINATIONS_SIZE["9:16"];
+    const seed = Math.floor(Math.random() * 1e9);
+    // Bake a strong cinematic-poster style onto whatever scene the user typed,
+    // so even a short prompt yields a dramatic, on-brand backdrop.
+    const styled =
+      `${prompt.trim()}, cinematic movie-poster backdrop, dramatic volumetric lighting, ` +
+      `deep shadows, moody atmosphere, drifting smoke, glowing embers, teal and amber color grade, ` +
+      `high contrast, subtle film grain, shot on cinema camera, ultra detailed, sharp focus, 8k, ` +
+      `empty background with open negative space for a subject, no people, no text, no watermark`;
+    const url =
+      `https://image.pollinations.ai/prompt/${encodeURIComponent(styled)}` +
+      `?width=${size.w}&height=${size.h}&nologo=true&enhance=true&model=flux&seed=${seed}`;
+    try {
+      const r = await fetch(url);
+      if (!r.ok) {
+        res.status(502).json({ error: `Free image service error (${r.status}). Try again.` });
+        return;
+      }
+      const ct = r.headers.get("content-type") || "image/jpeg";
+      if (!ct.startsWith("image")) {
+        res.status(502).json({ error: "Free image service is busy — try again in a moment." });
+        return;
+      }
+      const buf = Buffer.from(await r.arrayBuffer());
+      res.json({ status: "ready", dataUrl: `data:${ct};base64,${buf.toString("base64")}` });
+    } catch (e) {
+      res.status(502).json({ error: `Free image service failed: ${e instanceof Error ? e.message : "unknown error"}` });
     }
   }
 );

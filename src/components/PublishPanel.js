@@ -1,9 +1,23 @@
-import React, { useState } from 'react';
-import { SOCIAL_PLATFORMS, publishToSocial } from '../services/socialService';
+import React, { useState, useEffect } from 'react';
+import { SOCIAL_PLATFORMS, publishToSocial, publishByUrl } from '../services/socialService';
 
-export default function PublishPanel({ videoFile, content, onPublished, filename, thumbnail }) {
+// Posts a video to social platforms. Pass EITHER a `videoFile` (uploaded to
+// Storage first, with a progress bar) OR a `mediaUrl` for a clip that's already
+// hosted (e.g. a Higgsfield-generated / imported video) — that path skips upload.
+export default function PublishPanel({ videoFile, mediaUrl, content, onPublished, onShared, sharedPlatforms, filename, thumbnail, autoOpen }) {
+  // Library mode: sharedPlatforms is an array (even empty) — we mark already-
+  // shared platforms and pre-select the ones this video hasn't gone to yet.
+  const libraryMode = Array.isArray(sharedPlatforms);
+  const unshared = () =>
+    libraryMode ? SOCIAL_PLATFORMS.filter((p) => !sharedPlatforms.includes(p.id)).map((p) => p.id) : [];
+
   const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState([]);
+
+  // open automatically when the editor sends us here via "Continue to Post"
+  useEffect(() => {
+    if (autoOpen) setOpen(true);
+  }, [autoOpen]);
+  const [selected, setSelected] = useState(unshared);
   const [scheduleOn, setScheduleOn] = useState(false);
   const [scheduleAt, setScheduleAt] = useState('');
   const [caption, setCaption] = useState(() => {
@@ -32,13 +46,19 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
     setStatus(null);
     setProgress(0);
     try {
-      await publishToSocial(videoFile, {
-        post: caption,
-        title,
-        platforms: selected,
-        scheduleDate,
-        onProgress: setProgress,
-      });
+      if (videoFile) {
+        // An attached/edited file — upload it, then post (progress bar shows).
+        await publishToSocial(videoFile, {
+          post: caption,
+          title,
+          platforms: selected,
+          scheduleDate,
+          onProgress: setProgress,
+        });
+      } else if (mediaUrl) {
+        // Already-hosted clip (e.g. from the Library) — no upload step.
+        await publishByUrl(mediaUrl, { post: caption, title, platforms: selected, scheduleDate });
+      }
       const isScheduled = Boolean(scheduleDate);
       setStatus({
         type: 'ok',
@@ -58,6 +78,7 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
           status: isScheduled ? 'scheduled' : 'published',
         });
       }
+      if (onShared) onShared(selected);
     } catch (err) {
       setStatus({ type: 'error', message: err.message });
     } finally {
@@ -67,7 +88,7 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
 
   const uploadPct = Math.round(progress * 100);
 
-  const canPost = !posting && selected.length > 0 && caption.trim() && videoFile;
+  const canPost = !posting && selected.length > 0 && caption.trim() && (videoFile || mediaUrl);
 
   if (!open) {
     return (
@@ -92,6 +113,49 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
     );
   }
 
+  // SUCCESS STATE — replaces the compose form so it's unmistakable it posted
+  if (status?.type === 'ok' && !posting) {
+    const scheduled = status.message.startsWith('Scheduled');
+    return (
+      <div
+        style={{
+          width: '100%',
+          marginTop: 8,
+          background: '#03150F',
+          border: '1px solid #00C48C',
+          borderRadius: 10,
+          padding: 18,
+          boxSizing: 'border-box',
+          textAlign: 'center',
+        }}
+      >
+        <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#00C48C22', border: '1px solid #00C48C', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 10px', color: '#00C48C', fontSize: 22 }}>
+          ✓
+        </div>
+        <div style={{ color: '#00C48C', fontSize: 16, fontWeight: 700, marginBottom: 4 }}>
+          {scheduled ? 'Scheduled!' : 'Posted!'}
+        </div>
+        <div style={{ color: '#9FE7CF', fontSize: 12, marginBottom: 16, lineHeight: 1.5 }}>
+          {status.message}
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+          <button
+            onClick={() => { setStatus(null); setOpen(false); }}
+            style={{ background: '#00C48C', color: '#03150F', fontSize: 13, fontWeight: 700, padding: '8px 20px', borderRadius: 8, border: 'none', cursor: 'pointer' }}
+          >
+            Done
+          </button>
+          <button
+            onClick={() => { setStatus(null); setSelected(unshared()); }}
+            style={{ background: 'transparent', border: '1px solid #2A6B57', color: '#9FE7CF', fontSize: 13, padding: '8px 16px', borderRadius: 8, cursor: 'pointer' }}
+          >
+            Post another
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       style={{
@@ -104,22 +168,34 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
         boxSizing: 'border-box',
       }}
     >
-      <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', color: '#666', textTransform: 'uppercase', marginBottom: 10 }}>
-        Publish to platforms
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', color: '#666', textTransform: 'uppercase' }}>
+          {libraryMode ? 'Share to platforms' : 'Publish to platforms'}
+        </span>
+        {libraryMode && sharedPlatforms.length > 0 && (
+          <button
+            onClick={() => setSelected([...sharedPlatforms])}
+            style={{ background: 'transparent', border: '1px solid #333', color: '#888', fontSize: 11, padding: '3px 10px', borderRadius: 6, cursor: 'pointer' }}
+          >
+            ↻ Reshare posted
+          </button>
+        )}
       </div>
 
       {/* PLATFORM CHIPS */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
         {SOCIAL_PLATFORMS.map(({ id, label }) => {
           const active = selected.includes(id);
+          const shared = libraryMode && sharedPlatforms.includes(id);
           return (
             <button
               key={id}
               onClick={() => togglePlatform(id)}
+              title={shared ? 'Already shared — select to reshare' : ''}
               style={{
                 background: active ? '#00C48C22' : '#111',
-                border: `1px solid ${active ? '#00C48C' : '#333'}`,
-                color: active ? '#00C48C' : '#999',
+                border: `1px solid ${active ? '#00C48C' : shared ? '#2A6B57' : '#333'}`,
+                color: active ? '#00C48C' : shared ? '#6FBFA3' : '#999',
                 fontSize: 12,
                 fontWeight: 600,
                 padding: '6px 12px',
@@ -128,11 +204,18 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
                 transition: 'all 0.15s',
               }}
             >
-              {label}
+              {shared ? '✓ ' : ''}{label}
             </button>
           );
         })}
       </div>
+      {libraryMode && (
+        <div style={{ fontSize: 11, color: '#666', marginBottom: 12, lineHeight: 1.45 }}>
+          {sharedPlatforms.length > 0
+            ? `Already shared to ${sharedPlatforms.length} platform${sharedPlatforms.length !== 1 ? 's' : ''} (✓). New platforms are pre-selected.`
+            : 'Not shared anywhere yet — all platforms are pre-selected.'}
+        </div>
+      )}
 
       {/* TITLE (used for YouTube) */}
       <label style={{ display: 'block', fontSize: 10, color: '#666', letterSpacing: '0.1em', marginBottom: 4, textTransform: 'uppercase' }}>
@@ -212,13 +295,13 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
         />
       )}
 
-      {!videoFile && (
+      {!videoFile && !mediaUrl && (
         <div style={{ fontSize: 11, color: '#FFC107', marginBottom: 10, lineHeight: 1.45 }}>
           This card has no attached video file (e.g. loaded from Library), so it can’t be posted. Re-upload the video to post it.
         </div>
       )}
 
-      {posting && (
+      {posting && videoFile && (
         <div style={{ marginBottom: 10 }}>
           <div style={{ height: 6, background: '#1A1A1A', borderRadius: 3, overflow: 'hidden' }}>
             <div

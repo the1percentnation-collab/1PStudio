@@ -40,6 +40,41 @@
         "region": "us-central1"
       },
       {
+        "source": "/api/generate",
+        "function": "generateVideo",
+        "region": "us-central1"
+      },
+      {
+        "source": "/api/video-status",
+        "function": "videoStatus",
+        "region": "us-central1"
+      },
+      {
+        "source": "/api/import",
+        "function": "importVideo",
+        "region": "us-central1"
+      },
+      {
+        "source": "/api/cover-image",
+        "function": "generateCoverImage",
+        "region": "us-central1"
+      },
+      {
+        "source": "/api/cover-image-status",
+        "function": "coverImageStatus",
+        "region": "us-central1"
+      },
+      {
+        "source": "/api/cover-image-free",
+        "function": "coverImageFree",
+        "region": "us-central1"
+      },
+      {
+        "source": "/api/media",
+        "function": "mediaProxy",
+        "region": "us-central1"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

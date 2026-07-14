@@ -36,6 +36,8 @@ export function createDefaultSpec({ onScreenText = '', words = [], duration = nu
   return {
     version: 1,
     duration,
+    // crop is a rectangle in fractions of the SOURCE frame; full frame by default
+    crop: { x: 0, y: 0, w: 1, h: 1 },
     texts: onScreenText
       ? [makeTextElement({ text: onScreenText, x: 0.5, y: 0.18 })]
       : [],
@@ -51,11 +53,47 @@ export function createDefaultSpec({ onScreenText = '', words = [], duration = nu
   };
 }
 
+// Normalizes spec.crop to a safe rect {x,y,w,h} in [0,1] (full frame if unset).
+export function getCrop(spec) {
+  const c = spec?.crop;
+  if (!c) return { x: 0, y: 0, w: 1, h: 1 };
+  const w = Math.min(1, Math.max(0.05, c.w ?? 1));
+  const h = Math.min(1, Math.max(0.05, c.h ?? 1));
+  const x = Math.min(1 - w, Math.max(0, c.x ?? 0));
+  const y = Math.min(1 - h, Math.max(0, c.y ?? 0));
+  return { x, y, w, h };
+}
+
+// True when the crop is effectively the full frame (nothing to bake).
+export function isFullFrame(crop) {
+  const c = crop || {};
+  return (c.x ?? 0) <= 0.001 && (c.y ?? 0) <= 0.001 && (c.w ?? 1) >= 0.999 && (c.h ?? 1) >= 0.999;
+}
+
+// Draws the cropped region of `video` to fill an outW x outH surface.
+export function drawVideoFrame(ctx, video, crop, sourceW, sourceH, outW, outH) {
+  const c = crop || { x: 0, y: 0, w: 1, h: 1 };
+  ctx.drawImage(
+    video,
+    c.x * sourceW, c.y * sourceH, c.w * sourceW, c.h * sourceH,
+    0, 0, outW, outH
+  );
+}
+
+// Output pixel dimensions for a source + crop, rounded to even (H.264 needs it).
+export function cropOutputDims(crop, sourceW, sourceH) {
+  const c = crop || { x: 0, y: 0, w: 1, h: 1 };
+  const w = Math.max(2, Math.round((c.w * sourceW) / 2) * 2);
+  const h = Math.max(2, Math.round((c.h * sourceH) / 2) * 2);
+  return { w, h };
+}
+
 export async function ensureFontsLoaded() {
   if (typeof document === 'undefined' || !document.fonts?.load) return;
   try {
     await Promise.all([
       document.fonts.load("400 32px 'Bebas Neue'"),
+      document.fonts.load("400 32px 'Anton'"),
       document.fonts.load("700 32px 'DM Sans'"),
       document.fonts.load("800 32px 'DM Sans'"),
     ]);

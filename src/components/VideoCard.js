@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import PublishPanel from './PublishPanel';
 
 const PILLAR_COLORS = {
@@ -320,10 +320,18 @@ function TranscriptPanel({ onRegenerate, isRegenerating, initialTranscript }) {
   );
 }
 
-export default function VideoCard({ result, onRegenerate, onRemove, onPublished, onEdit }) {
+export default function VideoCard({ result, onRegenerate, onRemove, onPublished, onEdit, onMakeCover, autoOpenPublish, overrideVideoFile }) {
   const { id, filename, frames, content, error, _file, videoUrl, transcript } = result;
   const [isRegenerating, setIsRegenerating] = useState(false);
   const pillarColor = content ? (PILLAR_COLORS[content.content_pillar] || '#888') : '#888';
+  const cardRef = useRef(null);
+
+  // when the editor's "Continue to Post" targets this card, bring it into view
+  useEffect(() => {
+    if (autoOpenPublish && cardRef.current) {
+      cardRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [autoOpenPublish]);
 
   const handleRegenerate = async (transcript) => {
     setIsRegenerating(true);
@@ -348,7 +356,7 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished,
   };
 
   return (
-    <div style={{ background: '#111111', border: '1px solid #1A1A1A', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
+    <div ref={cardRef} style={{ background: '#111111', border: '1px solid #1A1A1A', borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
       {/* CARD HEADER */}
       <div style={{ padding: '14px 16px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -441,6 +449,19 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished,
           <ContentField label="CAPTION" value={content.caption} />
           <ContentField label="HASHTAGS" value={content.hashtags} />
 
+          {content.hook_dimensions && (
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
+              {['curiosity', 'specificity', 'callout', 'boldness', 'clarity'].map((k) =>
+                content.hook_dimensions[k] != null ? (
+                  <span key={k} style={{ fontSize: 11, color: '#999' }}>
+                    <span style={{ color: '#555', textTransform: 'capitalize' }}>{k}</span>{' '}
+                    <span style={{ color: hookScoreColor(content.hook_dimensions[k]), fontWeight: 700 }}>{content.hook_dimensions[k]}</span>
+                  </span>
+                ) : null
+              )}
+            </div>
+          )}
+
           {content.hook_score_reason && (
             <div style={{
               background: '#0A0A0A',
@@ -489,11 +510,12 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished,
 
         {content && (
           <PublishPanel
-            videoFile={_file}
+            videoFile={overrideVideoFile || _file}
             content={content}
             onPublished={onPublished}
             filename={filename}
             thumbnail={frames?.hookFrame}
+            autoOpen={autoOpenPublish}
           />
         )}
 
@@ -515,6 +537,27 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished,
             onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#333')}
           >
             ✂️ Edit Video
+          </button>
+        )}
+
+        {content && onMakeCover && (
+          <button
+            onClick={() => onMakeCover(id)}
+            style={{
+              background: '#1A1A1A',
+              color: '#FFF',
+              fontSize: 13,
+              fontWeight: 600,
+              padding: '8px 16px',
+              borderRadius: 8,
+              border: '1px solid #333',
+              cursor: 'pointer',
+              transition: 'border-color 0.2s',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#E60306')}
+            onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#333')}
+          >
+            🖼 Make Cover
           </button>
         )}
 
