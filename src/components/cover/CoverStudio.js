@@ -165,7 +165,7 @@ function CoverStage({ bgImage, subject, dims, texts, selectedId, onSelectText, o
   );
 }
 
-export default function CoverStudio({ result, onClose, onSaveCover }) {
+export default function CoverStudio({ result, isMobile, onClose, onSaveCover }) {
   const { videoUrl, frames, content, filename } = result;
   const [saveState, setSaveState] = useState('idle'); // idle | saving | saved | error
   const [aspect, setAspect] = useState('9:16');
@@ -345,12 +345,12 @@ export default function CoverStudio({ result, onClose, onSaveCover }) {
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: '#0A0A0A', display: 'flex', flexDirection: 'column' }}>
       {/* HEADER */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '0 20px', height: 56, borderBottom: '1px solid #1A1A1A', flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 16, padding: isMobile ? '8px 12px' : '0 20px', height: isMobile ? 'auto' : 56, minHeight: 52, flexWrap: 'wrap', borderBottom: '1px solid #1A1A1A', flexShrink: 0 }}>
         <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, letterSpacing: '0.05em' }}>
           <span style={{ color: '#E60306' }}>COVER</span>
           <span style={{ color: '#FFF', marginLeft: 6 }}>STUDIO</span>
         </div>
-        <div style={{ flex: 1, fontSize: 12, color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ flex: 1, fontSize: 12, color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: isMobile ? 'none' : 'block' }}>
           {filename}
         </div>
         {onSaveCover && (
@@ -375,8 +375,8 @@ export default function CoverStudio({ result, onClose, onSaveCover }) {
       </div>
 
       {/* BODY */}
-      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <div style={{ flex: 1, display: 'flex', padding: 16, minWidth: 0 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: isMobile ? 'column' : 'row', minHeight: 0 }}>
+        <div style={{ flex: isMobile ? 'none' : 1, height: isMobile ? '38vh' : 'auto', display: 'flex', padding: isMobile ? 10 : 16, minWidth: 0 }}>
           <CoverStage
             bgImage={bgImage}
             subject={subject}
@@ -388,7 +388,7 @@ export default function CoverStudio({ result, onClose, onSaveCover }) {
           />
         </div>
 
-        <div style={{ width: 320, flexShrink: 0, borderLeft: '1px solid #1A1A1A', background: '#111', overflowY: 'auto', padding: 18 }}>
+        <div style={{ width: isMobile ? '100%' : 320, flex: isMobile ? 1 : 'none', flexShrink: 0, borderLeft: isMobile ? 'none' : '1px solid #1A1A1A', borderTop: isMobile ? '1px solid #1A1A1A' : 'none', background: '#111', overflowY: 'auto', padding: isMobile ? 14 : 18, boxSizing: 'border-box' }}>
           {/* FORMAT */}
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', color: '#666', textTransform: 'uppercase', marginBottom: 8 }}>Format</div>

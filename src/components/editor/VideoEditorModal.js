@@ -16,7 +16,7 @@ function formatTime(t) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-export default function VideoEditorModal({ result, onClose, onSaveSpec, onWordsResolved, onContinueToPost }) {
+export default function VideoEditorModal({ result, isMobile, onClose, onSaveSpec, onWordsResolved, onContinueToPost }) {
   const videoRef = useRef(null);
   const [spec, setSpec] = useState(() => {
     const base =
@@ -211,8 +211,8 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec, onWordsR
       </div>
 
       {/* STAGE + CONTROLS */}
-      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <div style={{ flex: 1, display: 'flex', padding: 16, minWidth: 0 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: isMobile ? 'column' : 'row', minHeight: 0 }}>
+        <div style={{ flex: isMobile ? 'none' : 1, height: isMobile ? '38vh' : 'auto', display: 'flex', padding: isMobile ? 10 : 16, minWidth: 0 }}>
           {sourceUrl ? (
           <EditorStage
             videoUrl={sourceUrl}
@@ -237,12 +237,15 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec, onWordsR
 
         <div
           style={{
-            width: 320,
+            width: isMobile ? '100%' : 320,
+            flex: isMobile ? 1 : 'none',
             flexShrink: 0,
-            borderLeft: '1px solid #1A1A1A',
+            borderLeft: isMobile ? 'none' : '1px solid #1A1A1A',
+            borderTop: isMobile ? '1px solid #1A1A1A' : 'none',
             background: '#111',
             overflowY: 'auto',
-            padding: 18,
+            padding: isMobile ? 14 : 18,
+            boxSizing: 'border-box',
           }}
         >
           <TextControls
@@ -278,14 +281,16 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec, onWordsR
       <div
         style={{
           display: 'flex',
-          alignItems: 'center',
-          gap: 14,
-          padding: '0 20px',
-          height: 64,
+          flexDirection: isMobile ? 'column' : 'row',
+          alignItems: isMobile ? 'stretch' : 'center',
+          gap: isMobile ? 10 : 14,
+          padding: isMobile ? '10px 12px' : '0 20px',
+          height: isMobile ? 'auto' : 64,
           borderTop: '1px solid #1A1A1A',
           flexShrink: 0,
         }}
       >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: isMobile ? 'none' : 1, minWidth: 0 }}>
         <button
           onClick={togglePlay}
           disabled={isRendering}
@@ -318,7 +323,10 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec, onWordsR
         <span style={{ fontSize: 12, color: '#888', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
           {formatTime(currentTime)} / {formatTime(duration)}
         </span>
+        </div>
 
+        {/* actions group */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: isMobile ? 'space-between' : 'flex-end', flexWrap: 'wrap', flexShrink: 0 }}>
         {/* Continue to Post — bakes edits then jumps to the publish panel */}
         <button
           onClick={handleContinueToPost}
@@ -349,6 +357,7 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec, onWordsR
             exportState={exportState}
             setExportState={setExportState}
           />
+        </div>
         </div>
       </div>
     </div>

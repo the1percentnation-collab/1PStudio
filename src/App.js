@@ -391,6 +391,7 @@ export default function App() {
         <VideoEditorModal
           key={editorTarget.id}
           result={editorTarget}
+          isMobile={isMobile}
           onClose={closeEditor}
           onSaveSpec={handleSaveSpec}
           onWordsResolved={handleWordsResolved}
@@ -399,7 +400,7 @@ export default function App() {
       )}
 
       {coverResult && (
-        <CoverStudio result={coverResult} onClose={() => setCoverId(null)} onSaveCover={handleSaveCover} />
+        <CoverStudio result={coverResult} isMobile={isMobile} onClose={() => setCoverId(null)} onSaveCover={handleSaveCover} />
       )}
     </div>
   );
