@@ -82,6 +82,8 @@ export default function App() {
       sharedPlatforms: entry.sharedPlatforms || [],
       // saved editor overlays so a Library edit reopens where you left off
       overlaySpec: entry.overlaySpec || null,
+      // saved cover image (thumbnail) attached to this video
+      coverUrl: entry.coverUrl || null,
       error: entry.error,
       dateAdded: Date.now(),
     };
@@ -228,6 +230,12 @@ export default function App() {
   const handleEdit = useCallback((id) => setEditingId(id), []);
   const handleEditLibrary = useCallback((id) => setLibEditId(id), []);
   const handleMakeCover = useCallback((id) => setCoverId(id), []);
+
+  // attach a saved cover image URL to the video (kept in results + library)
+  const handleSaveCover = useCallback((id, coverUrl) => {
+    setResults((prev) => prev.map((r) => (r.id === id ? { ...r, coverUrl } : r)));
+    setLibrary((prev) => prev.map((i) => (i.id === id ? { ...i, coverUrl } : i)));
+  }, []);
 
   const closeEditor = useCallback(() => { setEditingId(null); setLibEditId(null); }, []);
 
@@ -391,7 +399,7 @@ export default function App() {
       )}
 
       {coverResult && (
-        <CoverStudio result={coverResult} onClose={() => setCoverId(null)} />
+        <CoverStudio result={coverResult} onClose={() => setCoverId(null)} onSaveCover={handleSaveCover} />
       )}
     </div>
   );

@@ -3,6 +3,7 @@ import { drawOverlays, getTextBounds, ensureFontsLoaded, makeTextElement } from 
 import TextControls from '../editor/TextControls';
 import { generateCoverImage, pollCoverImage, generateFreeCoverImage } from '../../services/higgsfieldService';
 import { removeBackground } from '@imgly/background-removal';
+import { uploadVideo } from '../../services/socialService';
 
 // A concrete SCENE renders far better than a list of adjectives (the backend
 // adds the cinematic-poster styling automatically). Edit to taste.
@@ -164,8 +165,9 @@ function CoverStage({ bgImage, subject, dims, texts, selectedId, onSelectText, o
   );
 }
 
-export default function CoverStudio({ result, onClose }) {
+export default function CoverStudio({ result, onClose, onSaveCover }) {
   const { videoUrl, frames, content, filename } = result;
+  const [saveState, setSaveState] = useState('idle'); // idle | saving | saved | error
   const [aspect, setAspect] = useState('9:16');
   const [bgImage, setBgImage] = useState(null);
   const [texts, setTexts] = useState(() => {
@@ -298,17 +300,40 @@ export default function CoverStudio({ result, onClose }) {
     }
   };
 
-  const download = async () => {
+  // Render the cover to a full-resolution canvas.
+  const renderCoverCanvas = async () => {
     await ensureFontsLoaded();
     const c = document.createElement('canvas');
     c.width = dims.w;
     c.height = dims.h;
     drawCoverScene(c.getContext('2d'), bgImage, subject, texts, dims.w, dims.h);
+    return c;
+  };
+
+  const download = async () => {
+    const c = await renderCoverCanvas();
     const base = (filename || 'video').replace(/\.[^.]+$/, '');
     const a = document.createElement('a');
     a.href = c.toDataURL('image/png');
     a.download = `${base}-cover-${aspect.replace(':', 'x')}.png`;
     a.click();
+  };
+
+  // Save the cover onto the video (uploads to Storage, attaches its URL) so it's
+  // kept with the clip and available when posting.
+  const saveWithVideo = async () => {
+    setSaveState('saving');
+    try {
+      const c = await renderCoverCanvas();
+      const blob = await new Promise((res) => c.toBlob(res, 'image/png'));
+      const base = (filename || 'video').replace(/\.[^.]+$/, '');
+      const file = new File([blob], `${base}-cover.png`, { type: 'image/png' });
+      const url = await uploadVideo(file);
+      onSaveCover?.(result.id, url);
+      setSaveState('saved');
+    } catch (e) {
+      setSaveState('error');
+    }
   };
 
   const frameBtns = [
@@ -328,6 +353,15 @@ export default function CoverStudio({ result, onClose }) {
         <div style={{ flex: 1, fontSize: 12, color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {filename}
         </div>
+        {onSaveCover && (
+          <button
+            onClick={saveWithVideo}
+            disabled={saveState === 'saving'}
+            style={{ background: saveState === 'saved' ? '#00C48C' : '#1A1A1A', color: '#FFF', fontSize: 13, fontWeight: 700, padding: '9px 16px', borderRadius: 8, border: '1px solid #333', cursor: saveState === 'saving' ? 'not-allowed' : 'pointer' }}
+          >
+            {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? '✓ Saved to video' : saveState === 'error' ? 'Save failed — retry' : '💾 Save with video'}
+          </button>
+        )}
         <button onClick={download} style={{ background: '#E60306', color: '#FFF', fontSize: 13, fontWeight: 700, padding: '9px 18px', borderRadius: 8, border: 'none', cursor: 'pointer' }}>
           ⬇ Download cover (PNG)
         </button>
