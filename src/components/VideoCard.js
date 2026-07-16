@@ -73,12 +73,16 @@ function ContentField({ label, value, mono }) {
   );
 }
 
-function FrameStrip({ frames }) {
-  const available = [
-    { label: 'HOOK', data: frames?.hookFrame },
-    { label: 'MID', data: frames?.midFrame },
-    { label: 'END', data: frames?.endFrame },
-  ].filter((f) => f.data);
+function FrameStrip({ frames, isPhoto }) {
+  const available = (
+    isPhoto
+      ? [{ label: 'PHOTO', data: frames?.hookFrame }]
+      : [
+          { label: 'HOOK', data: frames?.hookFrame },
+          { label: 'MID', data: frames?.midFrame },
+          { label: 'END', data: frames?.endFrame },
+        ]
+  ).filter((f) => f.data);
 
   if (available.length === 0) return null;
 
@@ -97,7 +101,7 @@ function FrameStrip({ frames }) {
               top: 6,
               left: 6,
               background: 'rgba(0,0,0,0.7)',
-              color: label === 'HOOK' ? '#E60306' : '#888',
+              color: label === 'HOOK' || label === 'PHOTO' ? '#E60306' : '#888',
               fontSize: 9,
               fontWeight: 700,
               letterSpacing: '0.1em',
@@ -248,7 +252,8 @@ function TranscriptPanel({ onRegenerate, isRegenerating }) {
 }
 
 export default function VideoCard({ result, onRegenerate, onRemove }) {
-  const { id, filename, frames, content, error } = result;
+  const { id, filename, frames, content, error, mediaType } = result;
+  const isPhoto = mediaType === 'photo';
   const [isRegenerating, setIsRegenerating] = useState(false);
   const pillarColor = content ? (PILLAR_COLORS[content.content_pillar] || '#888') : '#888';
 
@@ -316,15 +321,15 @@ export default function VideoCard({ result, onRegenerate, onRemove }) {
         </div>
       </div>
 
-      {/* FRAME STRIP — hook screenshot + mid + end, all downloadable */}
-      <FrameStrip frames={frames} />
+      {/* FRAME STRIP — hook screenshot + mid + end (or single photo), all downloadable */}
+      <FrameStrip frames={frames} isPhoto={isPhoto} />
 
       {/* CONTENT FIELDS */}
       {content && (
         <div style={{ padding: '4px 16px 12px' }}>
           {/* PRIMARY FIELDS — transcript-driven */}
           {content.best_title && (
-            <ContentField label="BEST VIDEO TITLE" value={content.best_title} mono />
+            <ContentField label={isPhoto ? 'BEST POST TITLE' : 'BEST VIDEO TITLE'} value={content.best_title} mono />
           )}
           {content.on_screen_text && (
             <ContentField label="ON-SCREEN TEXT" value={content.on_screen_text} mono />
@@ -352,7 +357,7 @@ export default function VideoCard({ result, onRegenerate, onRemove }) {
             </div>
           )}
           {content.video_description && (
-            <ContentField label="VIDEO DESCRIPTION" value={content.video_description} />
+            <ContentField label={isPhoto ? 'POST DESCRIPTION' : 'VIDEO DESCRIPTION'} value={content.video_description} />
           )}
 
           <div style={{ borderTop: '1px solid #1A1A1A', margin: '14px 0' }} />

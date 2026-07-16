@@ -43,6 +43,7 @@ export default function App() {
     const libraryEntry = {
       id: entry.id,
       filename: entry.filename,
+      mediaType: entry.mediaType ?? 'video',
       frames: { hookFrame: entry.frames?.hookFrame ?? null },
       content: entry.content,
       error: entry.error,
@@ -62,20 +63,21 @@ export default function App() {
   const processFile = useCallback(
     async (queueItem, transcript = '') => {
       const { id, file } = queueItem;
+      const fallbackMediaType = file.type.startsWith('image/') ? 'photo' : 'video';
       updateQueueItem(id, { status: 'processing', message: 'Starting...' });
 
       try {
-        const content = await generateTikTokContent(file, (msg) => {
+        const { content, frames, mediaType } = await generateTikTokContent(file, (msg) => {
           updateQueueItem(id, { message: msg });
         }, transcript);
 
         updateQueueItem(id, { status: 'done', message: '' });
-        const entry = { id, filename: file.name, _file: file, frames: {}, content, error: null };
+        const entry = { id, filename: file.name, _file: file, mediaType, frames, content, error: null };
         setResults((prev) => [entry, ...prev]);
         addToLibrary(entry);
       } catch (err) {
         updateQueueItem(id, { status: 'error', message: 'Failed' });
-        const entry = { id, filename: file.name, _file: file, frames: {}, content: null, error: err.message };
+        const entry = { id, filename: file.name, _file: file, mediaType: fallbackMediaType, frames: {}, content: null, error: err.message };
         setResults((prev) => [entry, ...prev]);
         addToLibrary(entry);
       }
@@ -209,7 +211,7 @@ export default function App() {
                   color: '#555',
                   marginBottom: 16,
                 }}>
-                  GENERATED CONTENT — {results.length} video{results.length !== 1 ? 's' : ''}
+                  GENERATED CONTENT — {results.length} post{results.length !== 1 ? 's' : ''}
                 </div>
                 {results.map((result) => (
                   <VideoCard

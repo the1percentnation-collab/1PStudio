@@ -55,7 +55,7 @@ export default function DropZone({ onFilesSelected, processing }) {
     setDragging(false);
     if (processing) return;
     const files = Array.from(e.dataTransfer.files).filter((f) =>
-      f.type.startsWith('video/')
+      f.type.startsWith('video/') || f.type.startsWith('image/')
     );
     if (files.length > 0) onFilesSelected(files.slice(0, 20));
   };
@@ -80,17 +80,17 @@ export default function DropZone({ onFilesSelected, processing }) {
     >
       <span style={iconStyle}>{icon}</span>
       <div style={headingStyle}>
-        {processing ? 'PROCESSING...' : 'DROP VIDEOS HERE'}
+        {processing ? 'PROCESSING...' : 'DROP VIDEOS OR PHOTOS HERE'}
       </div>
       <div style={subStyle}>
         {processing
           ? 'Please wait while your content is being generated'
-          : 'Drag & drop up to 20 video files, or click to browse'}
+          : 'Drag & drop up to 20 videos or photos, or click to browse'}
       </div>
       <input
         ref={inputRef}
         type="file"
-        accept="video/*"
+        accept="video/*,image/*"
         multiple
         style={{ display: 'none' }}
         onChange={handleChange}
