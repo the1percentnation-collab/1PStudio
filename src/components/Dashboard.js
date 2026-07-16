@@ -90,8 +90,16 @@ export default function Dashboard({ library, posts, onNavigate }) {
       </div>
 
       {/* RECENT ACTIVITY */}
-      <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, letterSpacing: '0.05em', color: '#888', marginBottom: 14 }}>
-        RECENT ACTIVITY
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, letterSpacing: '0.05em', color: '#888' }}>
+          RECENT ACTIVITY
+        </div>
+        <button
+          onClick={() => onNavigate('posts')}
+          style={{ background: 'transparent', border: 'none', color: '#888', fontSize: 12, cursor: 'pointer', padding: 0 }}
+        >
+          View all →
+        </button>
       </div>
 
       {recent.length === 0 ? (

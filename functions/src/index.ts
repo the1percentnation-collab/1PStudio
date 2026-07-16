@@ -340,6 +340,113 @@ export const accountsStatus = onRequest(
 );
 
 // ---------------------------------------------------------------------------
+// Post history — proxies Ayrshare's /api/history so the app can show REAL
+// post outcomes (published / still scheduled / failed at fire time) instead
+// of the optimistic local record written when a post was queued. Fields in
+// Ayrshare's response aren't contractually stable, so everything is
+// normalized defensively here and the client only sees one clean shape.
+// ---------------------------------------------------------------------------
+
+type NormStatus = "published" | "scheduled" | "failed";
+
+function normStatus(raw: unknown, dateIso: string | null): NormStatus {
+  const s = String(raw ?? "").toLowerCase();
+  if (["error", "failed", "failure"].includes(s)) return "failed";
+  if (s.startsWith("awaiting") || ["scheduled", "pending", "processing"].includes(s)) return "scheduled";
+  if (["success", "posted", "sent", "published"].includes(s)) return "published";
+  // Unknown status: a future date means it hasn't fired yet.
+  return dateIso && Date.parse(dateIso) > Date.now() ? "scheduled" : "published";
+}
+
+function toIso(v: unknown): string | null {
+  if (typeof v === "string" && !Number.isNaN(Date.parse(v))) return new Date(v).toISOString();
+  const obj = v as { _seconds?: number; seconds?: number; utc?: string } | null | undefined;
+  const secs = obj?._seconds ?? obj?.seconds;
+  if (typeof secs === "number") return new Date(secs * 1000).toISOString();
+  if (typeof obj?.utc === "string" && !Number.isNaN(Date.parse(obj.utc))) return new Date(obj.utc).toISOString();
+  return null;
+}
+
+function normErrors(item: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const push = (e: unknown) => {
+    if (typeof e === "string" && e.trim()) out.push(e.trim());
+    else if (e && typeof e === "object") {
+      const msg = (e as { message?: unknown; error?: unknown }).message ?? (e as { error?: unknown }).error;
+      const platform = (e as { platform?: unknown }).platform;
+      if (typeof msg === "string" && msg.trim()) out.push(platform ? `${platform}: ${msg.trim()}` : msg.trim());
+    }
+  };
+  if (Array.isArray(item.errors)) item.errors.forEach(push);
+  if (Array.isArray(item.posts)) {
+    for (const p of item.posts as Record<string, unknown>[]) {
+      if (Array.isArray(p?.errors)) p.errors.forEach(push);
+    }
+  }
+  if (out.length === 0 && String(item.status ?? "").toLowerCase() === "error" && typeof item.message === "string") {
+    push(item.message);
+  }
+  return out;
+}
+
+export const postHistory = onRequest(
+  {
+    cors: true,
+    timeoutSeconds: 30,
+    memory: "256MiB",
+  },
+  async (_req, res) => {
+    const apiKey = process.env.AYRSHARE_API_KEY;
+    if (!apiKey) {
+      res.status(200).json({ configured: false, posts: [] });
+      return;
+    }
+
+    try {
+      const ayrRes = await fetch("https://api.ayrshare.com/api/history", {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      const data = (await ayrRes.json().catch(() => ({}))) as Record<string, unknown>;
+
+      if (!ayrRes.ok) {
+        res.status(200).json({ configured: true, posts: [], error: `Ayrshare error ${ayrRes.status}` });
+        return;
+      }
+
+      // The history envelope may be a bare array or wrapped in a key.
+      const items: Record<string, unknown>[] = Array.isArray(data)
+        ? data
+        : ((data.history ?? data.posts ?? data.items ?? []) as Record<string, unknown>[]);
+
+      const posts = (Array.isArray(items) ? items : [])
+        .map((item) => {
+          const rawId = item.id ?? item.postId ?? item._id;
+          if (!rawId) return null;
+          const date =
+            toIso(item.scheduleDate) ?? toIso(item.created) ?? toIso(item.createdUTC) ?? toIso(item.publishDate);
+          return {
+            id: String(rawId),
+            status: normStatus(item.status, date),
+            caption: String(item.post ?? item.caption ?? ""),
+            platforms: (Array.isArray(item.platforms) ? item.platforms : [])
+              .map((p) => FROM_AYRSHARE[String(p).toLowerCase()] ?? String(p)),
+            mediaUrls: (Array.isArray(item.mediaUrls) ? item.mediaUrls : []).filter(
+              (u): u is string => typeof u === "string"
+            ),
+            date,
+            errors: normErrors(item),
+          };
+        })
+        .filter(Boolean);
+
+      res.json({ configured: true, posts });
+    } catch (e) {
+      res.status(200).json({ configured: true, posts: [], error: e instanceof Error ? e.message : "unknown error" });
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
 // Captions — auto-transcribe a video (Deepgram) and burn word-synced captions
 // into the video with ffmpeg. Additive: independent of Claude/Anthropic.
 //

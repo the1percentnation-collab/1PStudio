@@ -45,6 +45,17 @@ export async function uploadVideo(videoFile, onProgress) {
   return getDownloadURL(task.snapshot.ref);
 }
 
+// Fetches normalized post history from Ayrshare via the postHistory function.
+// Returns { configured, posts: [{id, status, caption, platforms, mediaUrls, date, errors}], error? }
+export async function getPostHistory() {
+  const response = await fetch('/api/history');
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.error || `Failed to load history (${response.status})`);
+  }
+  return data;
+}
+
 // Fetches which social accounts are connected in Ayrshare.
 export async function getConnectedAccounts() {
   const response = await fetch('/api/accounts');

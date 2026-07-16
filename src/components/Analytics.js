@@ -72,7 +72,7 @@ function Gauge({ value, max = 10, size = 150, thickness = 16, label, accent = '#
   );
 }
 
-function AreaChart({ data, height = 180, accent = '#E60306' }) {
+function AreaChart({ data, height = 180, accent = '#E60306', gradientId = 'areaFill' }) {
   const W = 600;
   const H = height;
   const padX = 8;
@@ -92,7 +92,7 @@ function AreaChart({ data, height = 180, accent = '#E60306' }) {
   return (
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: 'block' }}>
       <defs>
-        <linearGradient id="areaFill" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={accent} stopOpacity="0.35" />
           <stop offset="100%" stopColor={accent} stopOpacity="0" />
         </linearGradient>
@@ -101,7 +101,7 @@ function AreaChart({ data, height = 180, accent = '#E60306' }) {
         <line key={i} x1={padX} x2={padX + innerW} y1={padTop + innerH - g * innerH} y2={padTop + innerH - g * innerH}
           stroke="#1A1A1A" strokeWidth="1" strokeDasharray="3 4" />
       ))}
-      <polygon points={areaPts} fill="url(#areaFill)" />
+      <polygon points={areaPts} fill={`url(#${gradientId})`} />
       <polyline points={linePts} fill="none" stroke={accent} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
       {data.map((d, i) => (
         (i === 0 || i === n - 1 || d.value === max) && (
@@ -153,6 +153,92 @@ function MetricPill({ label, value, accent }) {
   );
 }
 
+/* ---------- consistency helpers ---------- */
+
+// Local-time Sunday that starts the week containing d.
+function weekStart(d) {
+  const w = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  w.setDate(w.getDate() - w.getDay());
+  return w;
+}
+
+const WEEK_MS = 7 * 24 * 3600 * 1000;
+
+// posts -> Map<weekStartMs, count> over all activity.
+function weeklyCounts(activePosts) {
+  const counts = new Map();
+  for (const p of activePosts) {
+    const ms = weekStart(new Date(p.date)).getTime();
+    counts.set(ms, (counts.get(ms) || 0) + 1);
+  }
+  return counts;
+}
+
+// Consecutive weeks with ≥1 post ending at the current week. An empty
+// CURRENT week doesn't break the streak (it's still in progress); an empty
+// prior week does.
+function currentStreak(counts, now) {
+  let week = weekStart(now).getTime();
+  let streak = 0;
+  if (counts.get(week)) {
+    streak = 1;
+    week -= WEEK_MS;
+  } else {
+    week -= WEEK_MS; // grace: skip the in-progress week
+  }
+  while (counts.get(week)) {
+    streak += 1;
+    week -= WEEK_MS;
+  }
+  return streak;
+}
+
+function longestStreak(counts) {
+  const weeks = [...counts.keys()].sort((a, b) => a - b);
+  let best = 0;
+  let run = 0;
+  let prev = null;
+  for (const w of weeks) {
+    run = prev !== null && w - prev === WEEK_MS ? run + 1 : 1;
+    best = Math.max(best, run);
+    prev = w;
+  }
+  return best;
+}
+
+const DAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+function WeekdayBars({ counts }) {
+  const W = 300;
+  const H = 140;
+  const padBottom = 20;
+  const padTop = 16;
+  const barW = 26;
+  const gap = (W - 7 * barW) / 8;
+  const max = Math.max(1, ...counts);
+  const maxIdx = counts.indexOf(Math.max(...counts));
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }}>
+      {counts.map((c, i) => {
+        const h = c === 0 ? 2 : ((H - padTop - padBottom) * c) / max;
+        const xPos = gap + i * (barW + gap);
+        const yPos = H - padBottom - h;
+        return (
+          <g key={i}>
+            <rect x={xPos} y={yPos} width={barW} height={h} rx="3" fill={c > 0 && i === maxIdx ? '#E60306' : '#2A2A2A'} />
+            {c > 0 && (
+              <text x={xPos + barW / 2} y={yPos - 5} textAnchor="middle" fontSize="10" fill="#888">{c}</text>
+            )}
+            <text x={xPos + barW / 2} y={H - 6} textAnchor="middle" fontSize="10" fill="#555">{DAY_LETTERS[i]}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 /* ---------- view ---------- */
 
 export default function Analytics({ library, posts }) {
@@ -189,6 +275,30 @@ export default function Analytics({ library, posts }) {
   }
   const hasTimeline = days.some((d) => d.value > 0);
   const distinctPlatforms = Object.keys(platformTally).length;
+
+  // ---- frequency & consistency (failed posts and future-scheduled aren't activity) ----
+  const now = new Date();
+  const active = posts.filter((p) => {
+    const t = Date.parse(p.date);
+    return p.status !== 'failed' && !Number.isNaN(t) && t <= now.getTime();
+  });
+  const wCounts = weeklyCounts(active);
+
+  // last 12 weeks ending at the current week
+  const thisWeek = weekStart(now).getTime();
+  const weeks = [];
+  for (let i = 11; i >= 0; i--) {
+    const ms = thisWeek - i * WEEK_MS;
+    weeks.push({ date: new Date(ms), value: wCounts.get(ms) || 0 });
+  }
+  const hasWeekly = weeks.some((w) => w.value > 0);
+  const avgPerWeek = (weeks.reduce((s, w) => s + w.value, 0) / 12).toFixed(1);
+  const curStreak = currentStreak(wCounts, now);
+  const bestStreak = longestStreak(wCounts);
+
+  const weekdayCounts = [0, 0, 0, 0, 0, 0, 0];
+  active.forEach((p) => { weekdayCounts[new Date(p.date).getDay()] += 1; });
+  const topDay = active.length ? DAY_NAMES[weekdayCounts.indexOf(Math.max(...weekdayCounts))] : '—';
 
   return (
     <div>
@@ -247,6 +357,40 @@ export default function Analytics({ library, posts }) {
           <EmptyChart label="Your posting activity will chart here once you publish or schedule posts" />
         )}
       </Card>
+
+      {/* CONSISTENCY */}
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 16 }}>
+        <Card title="Posting Consistency — Last 12 Weeks" icon="📅" span>
+          {hasWeekly || active.length > 0 ? (
+            <>
+              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 18 }}>
+                <MetricPill label="Avg Posts / Week" value={avgPerWeek} />
+                <MetricPill label="Current Streak" value={`${curStreak} wk${curStreak !== 1 ? 's' : ''}`} accent={curStreak >= 2 ? '#00C48C' : undefined} />
+                <MetricPill label="Longest Streak" value={`${bestStreak} wk${bestStreak !== 1 ? 's' : ''}`} />
+                <MetricPill label="Most Active Day" value={topDay} accent="#2980B9" />
+              </div>
+              <AreaChart data={weeks} gradientId="weeklyFill" accent="#00C48C" />
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 10, color: '#555' }}>
+                <span>{weeks[0].date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+                <span>{weeks[6].date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+                <span>{weeks[11].date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+              </div>
+            </>
+          ) : (
+            <EmptyChart label="Consistency metrics appear once you start posting — streaks, weekly cadence, and your most active day" />
+          )}
+        </Card>
+      </div>
+
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 16 }}>
+        <Card title="Posts by Weekday" icon="📊">
+          {active.length === 0 ? (
+            <EmptyChart label="No posts yet" />
+          ) : (
+            <WeekdayBars counts={weekdayCounts} />
+          )}
+        </Card>
+      </div>
 
       {/* NOTE */}
       <div style={{

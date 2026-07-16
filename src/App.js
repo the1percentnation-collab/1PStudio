@@ -1,7 +1,8 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import CalendarView from './components/CalendarView';
+import PostsView from './components/PostsView';
 import Analytics from './components/Analytics';
 import AccountsView from './components/AccountsView';
 import CaptionsView from './components/CaptionsView';
@@ -10,6 +11,7 @@ import VideoCard from './components/VideoCard';
 import QueueProgress from './components/QueueProgress';
 import LibraryView from './components/LibraryView';
 import { generateTikTokContent } from './services/claudeService';
+import { syncPostHistory } from './services/postSync';
 import VideoEditorModal from './components/editor/VideoEditorModal';
 
 const LIBRARY_KEY = '1p-studio-library';
@@ -40,6 +42,7 @@ const VIEW_META = {
   composer: { title: 'Composer', subtitle: 'Generate and publish content' },
   captions: { title: 'Captions', subtitle: 'Auto burned-in subtitles' },
   calendar: { title: 'Content Calendar', subtitle: 'Scheduled & published posts' },
+  posts: { title: 'Posts', subtitle: 'Everything scheduled & published' },
   analytics: { title: 'Analytics', subtitle: 'Performance & content insights' },
   library: { title: 'Library', subtitle: 'Saved generated content' },
   accounts: { title: 'Accounts', subtitle: 'Connect your social platforms' },
@@ -55,7 +58,25 @@ export default function App() {
   const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 768 : false));
 
   useEffect(() => { saveJSON(LIBRARY_KEY, library); }, [library]);
-  useEffect(() => { saveJSON(POSTS_KEY, posts); }, [posts]);
+
+  // Ref mirrors posts so syncPosts stays a stable callback (Refresh can fire
+  // long after mount without capturing a stale posts array).
+  const postsRef = useRef(posts);
+  useEffect(() => {
+    postsRef.current = posts;
+    saveJSON(POSTS_KEY, posts);
+  }, [posts]);
+
+  const [syncState, setSyncState] = useState({ loading: false, configured: null, error: null });
+  const syncPosts = useCallback(async () => {
+    setSyncState((s) => ({ ...s, loading: true }));
+    const { posts: merged, configured, error } = await syncPostHistory(postsRef.current);
+    setPosts(merged);
+    setSyncState({ loading: false, configured, error: error || null });
+  }, []);
+
+  // Reconcile once on load so stale "scheduled" statuses correct themselves.
+  useEffect(() => { syncPosts(); }, [syncPosts]);
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 768);
@@ -209,6 +230,9 @@ export default function App() {
     }
     if (view === 'calendar') {
       return <CalendarView posts={posts} onNavigate={setView} isMobile={isMobile} />;
+    }
+    if (view === 'posts') {
+      return <PostsView posts={posts} onNavigate={setView} onRefresh={syncPosts} syncState={syncState} isMobile={isMobile} />;
     }
     if (view === 'captions') {
       return <CaptionsView />;
