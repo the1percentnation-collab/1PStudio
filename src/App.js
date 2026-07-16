@@ -13,6 +13,7 @@ import LibraryView from './components/LibraryView';
 import { generateTikTokContent } from './services/claudeService';
 import { syncPostHistory } from './services/postSync';
 import VideoEditorModal from './components/editor/VideoEditorModal';
+import TextPostCreator from './components/TextPostCreator';
 
 const LIBRARY_KEY = '1p-studio-library';
 const POSTS_KEY = '1p-studio-posts';
@@ -204,6 +205,7 @@ export default function App() {
 
   const [editingId, setEditingId] = useState(null);
   const editingResult = results.find((r) => r.id === editingId) || null;
+  const [showTextCreator, setShowTextCreator] = useState(false);
 
   const handleEdit = useCallback((id) => setEditingId(id), []);
 
@@ -249,6 +251,28 @@ export default function App() {
     // composer
     return (
       <>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <button
+            onClick={() => setShowTextCreator(true)}
+            disabled={processing}
+            style={{
+              background: '#111',
+              border: '1px solid #2A2A2A',
+              borderRadius: 10,
+              padding: '10px 16px',
+              color: '#FFF',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: processing ? 'not-allowed' : 'pointer',
+              opacity: processing ? 0.5 : 1,
+              transition: 'border-color 0.2s',
+            }}
+            onMouseEnter={(e) => { if (!processing) e.currentTarget.style.borderColor = '#E60306'; }}
+            onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#2A2A2A')}
+          >
+            ✍️ Create Text Post
+          </button>
+        </div>
         <DropZone onFilesSelected={handleFilesSelected} processing={processing} />
 
         {isQueueActive && (
@@ -326,6 +350,14 @@ export default function App() {
           result={editingResult}
           onClose={() => setEditingId(null)}
           onSaveSpec={handleSaveSpec}
+        />
+      )}
+
+      {/* full-screen text post creator — rendered card feeds the photo pipeline */}
+      {showTextCreator && (
+        <TextPostCreator
+          onClose={() => setShowTextCreator(false)}
+          onCreate={(file) => handleFilesSelected([file])}
         />
       )}
     </div>

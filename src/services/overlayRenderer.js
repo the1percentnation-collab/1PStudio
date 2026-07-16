@@ -26,6 +26,7 @@ export function makeTextElement({ text = 'YOUR TEXT', x = 0.5, y = 0.5 } = {}) {
     bgOpacity: 0.8,
     outline: { color: '#000000', width: 0.12 }, // width is a fraction of font size
     shadow: null, // { color, blur, dx, dy } as fractions of font size
+    align: 'center', // 'left' | 'center' | 'right' — lines align within the block
     maxWidth: 0.9,
     start: 0,
     end: null, // null = until video end
@@ -58,6 +59,10 @@ export async function ensureFontsLoaded() {
       document.fonts.load("400 32px 'Bebas Neue'"),
       document.fonts.load("700 32px 'DM Sans'"),
       document.fonts.load("800 32px 'DM Sans'"),
+      document.fonts.load("400 32px 'Archivo Black'"),
+      document.fonts.load("400 32px 'Pacifico'"),
+      document.fonts.load("700 32px 'Courier Prime'"),
+      document.fonts.load("700 32px 'Caveat'"),
     ]);
   } catch {
     // canvas falls back to a default font — never block rendering on fonts
@@ -117,7 +122,7 @@ function isTextVisible(el, t) {
 }
 
 // Computes wrapped lines + pixel geometry for a text element.
-function layoutText(ctx, el, videoW, videoH) {
+export function layoutText(ctx, el, videoW, videoH) {
   const fontPx = el.size * videoH;
   ctx.font = fontString(el.weight, fontPx, el.font);
   const lines = wrapText(ctx, el.text, el.maxWidth * videoW);
@@ -131,10 +136,17 @@ function layoutText(ctx, el, videoW, videoH) {
 }
 
 function drawTextElement(ctx, el, videoW, videoH) {
-  const { fontPx, lines, widths, lineHeight, blockH, cx, cy } = layoutText(ctx, el, videoW, videoH);
+  const { fontPx, lines, widths, lineHeight, blockW, blockH, cx, cy } = layoutText(ctx, el, videoW, videoH);
   ctx.font = fontString(el.weight, fontPx, el.font);
-  ctx.textAlign = 'center';
+  // Block stays anchored at el.x; lines align within it (undefined align →
+  // center, pixel-identical to the pre-align behavior for existing specs).
+  const align = el.align || 'center';
+  ctx.textAlign = align;
   ctx.textBaseline = 'middle';
+
+  const leftX = cx - blockW / 2;
+  const rightX = cx + blockW / 2;
+  const lineX = align === 'left' ? leftX : align === 'right' ? rightX : cx;
 
   const padX = fontPx * 0.32;
   const padY = fontPx * 0.14;
@@ -143,8 +155,11 @@ function drawTextElement(ctx, el, videoW, videoH) {
     const lineY = cy - blockH / 2 + lineHeight * (i + 0.5);
 
     if (el.bg && line) {
+      const bgX = align === 'left' ? leftX - padX
+        : align === 'right' ? rightX - widths[i] - padX
+        : cx - widths[i] / 2 - padX;
       ctx.fillStyle = hexWithOpacity(el.bg, el.bgOpacity ?? 0.8);
-      roundRect(ctx, cx - widths[i] / 2 - padX, lineY - fontPx / 2 - padY, widths[i] + padX * 2, fontPx + padY * 2, fontPx * 0.22);
+      roundRect(ctx, bgX, lineY - fontPx / 2 - padY, widths[i] + padX * 2, fontPx + padY * 2, fontPx * 0.22);
       ctx.fill();
     }
 
@@ -160,11 +175,11 @@ function drawTextElement(ctx, el, videoW, videoH) {
       ctx.lineWidth = Math.max(1, el.outline.width * fontPx);
       ctx.lineJoin = 'round';
       ctx.miterLimit = 2;
-      ctx.strokeText(line, cx, lineY);
+      ctx.strokeText(line, lineX, lineY);
     }
 
     ctx.fillStyle = el.color;
-    ctx.fillText(line, cx, lineY);
+    ctx.fillText(line, lineX, lineY);
 
     ctx.shadowColor = 'transparent';
     ctx.shadowBlur = 0;
