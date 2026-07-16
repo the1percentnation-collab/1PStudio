@@ -83,7 +83,7 @@ function TitleRow({ title, index }) {
 
 function LibraryCard({ item, onDelete }) {
   const [expanded, setExpanded] = useState(false);
-  const { filename, frames, content, error, dateAdded, mediaType } = item;
+  const { filename, frames, content, transcript, error, dateAdded, mediaType } = item;
   const isPhoto = mediaType === 'photo';
   const pillarColor = content ? (PILLAR_COLORS[content.content_pillar] || '#888') : '#888';
 
@@ -180,6 +180,7 @@ function LibraryCard({ item, onDelete }) {
                 </div>
               )}
               {content.video_description && <Field label={isPhoto ? 'POST DESCRIPTION' : 'VIDEO DESCRIPTION'} value={content.video_description} />}
+              {transcript && <Field label="TRANSCRIPT" value={transcript} muted />}
 
               <div style={{ borderTop: '1px solid #1A1A1A', margin: '12px 0' }} />
 
@@ -242,7 +243,7 @@ export default function LibraryView({ library, onDelete }) {
           YOUR LIBRARY IS EMPTY
         </div>
         <div style={{ fontSize: 13, color: '#333' }}>
-          Process videos or photos in the Upload tab — they'll be saved here automatically.
+          Process videos or photos in the Composer — they'll be saved here automatically.
         </div>
       </div>
     );

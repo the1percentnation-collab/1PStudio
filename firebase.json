@@ -1,6 +1,10 @@
 {
   "functions": {
-    "source": "functions"
+    "source": "functions",
+        "runtime": "nodejs20"
+  },
+  "storage": {
+    "rules": "storage.rules"
   },
   "hosting": {
     "public": "build",
@@ -13,6 +17,26 @@
       {
         "source": "/api/analyze",
         "function": "analyzeVideo",
+        "region": "us-central1"
+      },
+      {
+        "source": "/api/publish",
+        "function": "publishPost",
+        "region": "us-central1"
+      },
+      {
+        "source": "/api/accounts",
+        "function": "accountsStatus",
+        "region": "us-central1"
+      },
+      {
+        "source": "/api/caption",
+        "function": "captionVideo",
+        "region": "us-central1"
+      },
+      {
+        "source": "/api/transcribe",
+        "function": "transcribeAudio",
         "region": "us-central1"
       },
       {

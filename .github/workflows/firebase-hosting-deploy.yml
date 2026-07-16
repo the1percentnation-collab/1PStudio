@@ -37,11 +37,30 @@ jobs:
         env:
           GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AYRSHARE_API_KEY: ${{ secrets.AYRSHARE_API_KEY }}
+          DEEPGRAM_API_KEY: ${{ secrets.DEEPGRAM_API_KEY }}
         run: |
           echo "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/sa.json
           export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json
-          echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" > functions/.env
-          firebase deploy --only functions --project onepstudio-9a3ef
+          # firebase-functions v2 auto-loads functions/.env at runtime.
+          # (firebase deploy has no --set-env-vars flag — that's a gcloud flag.)
+          # Strip stray CR/LF/whitespace from secret values so a valid,
+          # single-line dotenv file is written, and skip empty keys.
+          ANTHROPIC_CLEAN="$(printf '%s' "$ANTHROPIC_API_KEY" | tr -d '\r\n' | xargs)"
+          AYRSHARE_CLEAN="$(printf '%s' "$AYRSHARE_API_KEY" | tr -d '\r\n' | xargs)"
+          DEEPGRAM_CLEAN="$(printf '%s' "$DEEPGRAM_API_KEY" | tr -d '\r\n' | xargs)"
+          {
+            printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_CLEAN"
+            if [ -n "$AYRSHARE_CLEAN" ]; then
+              printf 'AYRSHARE_API_KEY=%s\n' "$AYRSHARE_CLEAN"
+            fi
+            if [ -n "$DEEPGRAM_CLEAN" ]; then
+              printf 'DEEPGRAM_API_KEY=%s\n' "$DEEPGRAM_CLEAN"
+            fi
+          } > functions/.env
+          # Storage rules are deployed manually from the console (the default
+          # bucket must be initialized first); CI deploys functions only.
+          firebase deploy --only functions --project onepstudio-9a3ef --force
 
       - name: Deploy to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
