@@ -70,24 +70,72 @@ export async function extractFramesFromVideo(videoFile) {
   });
 }
 
-export async function generateTikTokContent(videoFile, onProgress, transcript = '') {
-  onProgress('Extracting frames...');
+const MAX_IMAGE_DIM = 1280;
+
+// Decode an image file, draw it to a canvas (capped to MAX_IMAGE_DIM on the
+// long edge), and return a base64 JPEG. Mirrors the canvas -> JPEG approach in
+// extractFrameAt so the output matches the backend's image/jpeg media_type.
+export async function fileToImageBase64(imageFile) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(imageFile);
+    const img = new Image();
+
+    img.onload = () => {
+      try {
+        const w = img.naturalWidth || img.width || 640;
+        const h = img.naturalHeight || img.height || 640;
+        const scale = Math.min(1, MAX_IMAGE_DIM / Math.max(w, h));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(w * scale);
+        canvas.height = Math.round(h * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        URL.revokeObjectURL(url);
+        resolve(canvas.toDataURL('image/jpeg', 0.85).split(',')[1]);
+      } catch {
+        URL.revokeObjectURL(url);
+        resolve(null);
+      }
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(null);
+    };
+
+    img.src = url;
+  });
+}
+
+export async function generateTikTokContent(file, onProgress, transcript = '') {
+  const isPhoto = file.type.startsWith('image/');
+  const mediaType = isPhoto ? 'photo' : 'video';
 
   let frames = { hookFrame: null, midFrame: null, endFrame: null };
-  try {
-    frames = await extractFramesFromVideo(videoFile);
-  } catch {
-    /* non-fatal */
+  if (isPhoto) {
+    onProgress('Reading photo...');
+    try {
+      frames = { hookFrame: await fileToImageBase64(file), midFrame: null, endFrame: null };
+    } catch {
+      /* non-fatal */
+    }
+  } else {
+    onProgress('Extracting frames...');
+    try {
+      frames = await extractFramesFromVideo(file);
+    } catch {
+      /* non-fatal */
+    }
   }
 
   // If no transcript was supplied, auto-transcribe the audio so Claude grades
   // the actual spoken content (the real hook/message), not just still frames.
-  // Best-effort: any failure falls back to frame-only analysis.
+  // Best-effort: any failure falls back to frame-only analysis. Photos have
+  // no audio, so they skip transcription entirely.
   let finalTranscript = (transcript || '').trim();
   let words = [];
-  if (!finalTranscript) {
+  if (!isPhoto && !finalTranscript) {
     try {
-      const mediaUrl = await uploadVideo(videoFile, (p) =>
+      const mediaUrl = await uploadVideo(file, (p) =>
         onProgress(`Uploading for analysis… ${Math.round(p * 100)}%`)
       );
       onProgress('Transcribing audio…');
@@ -104,7 +152,7 @@ export async function generateTikTokContent(videoFile, onProgress, transcript = 
   const response = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ frames, transcript: finalTranscript, filename: videoFile.name }),
+    body: JSON.stringify({ frames, transcript: finalTranscript, filename: file.name, mediaType }),
   });
 
   if (!response.ok) {
@@ -114,5 +162,5 @@ export async function generateTikTokContent(videoFile, onProgress, transcript = 
 
   onProgress('Parsing response...');
   const content = await response.json();
-  return { content, frames, transcript: finalTranscript, words };
+  return { content, frames, transcript: finalTranscript, words, mediaType };
 }

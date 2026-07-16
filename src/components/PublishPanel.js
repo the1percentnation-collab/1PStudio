@@ -1,7 +1,12 @@
 import React, { useState } from 'react';
 import { SOCIAL_PLATFORMS, publishToSocial } from '../services/socialService';
 
-export default function PublishPanel({ videoFile, content, onPublished, filename, thumbnail }) {
+export default function PublishPanel({ videoFile, content, onPublished, filename, thumbnail, mediaType }) {
+  const isPhoto = mediaType === 'photo';
+  // YouTube is video-only; photos post to Instagram as regular feed posts, not Reels.
+  const platforms = SOCIAL_PLATFORMS
+    .filter(({ id }) => !(isPhoto && id === 'youtube'))
+    .map(({ id, label }) => (isPhoto && id === 'instagram' ? { id, label: 'Instagram' } : { id, label }));
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState([]);
   const [scheduleOn, setScheduleOn] = useState(false);
@@ -110,7 +115,7 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
 
       {/* PLATFORM CHIPS */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-        {SOCIAL_PLATFORMS.map(({ id, label }) => {
+        {platforms.map(({ id, label }) => {
           const active = selected.includes(id);
           return (
             <button
@@ -134,27 +139,31 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
         })}
       </div>
 
-      {/* TITLE (used for YouTube) */}
-      <label style={{ display: 'block', fontSize: 10, color: '#666', letterSpacing: '0.1em', marginBottom: 4, textTransform: 'uppercase' }}>
-        Title (YouTube)
-      </label>
-      <input
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        maxLength={100}
-        style={{
-          width: '100%',
-          background: '#111',
-          border: '1px solid #2A2A2A',
-          borderRadius: 8,
-          color: '#DDD',
-          fontSize: 12,
-          padding: '8px 10px',
-          boxSizing: 'border-box',
-          marginBottom: 10,
-          fontFamily: 'inherit',
-        }}
-      />
+      {/* TITLE (used for YouTube — hidden for photos, which can't post there) */}
+      {!isPhoto && (
+        <>
+          <label style={{ display: 'block', fontSize: 10, color: '#666', letterSpacing: '0.1em', marginBottom: 4, textTransform: 'uppercase' }}>
+            Title (YouTube)
+          </label>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            maxLength={100}
+            style={{
+              width: '100%',
+              background: '#111',
+              border: '1px solid #2A2A2A',
+              borderRadius: 8,
+              color: '#DDD',
+              fontSize: 12,
+              padding: '8px 10px',
+              boxSizing: 'border-box',
+              marginBottom: 10,
+              fontFamily: 'inherit',
+            }}
+          />
+        </>
+      )}
 
       {/* CAPTION */}
       <label style={{ display: 'block', fontSize: 10, color: '#666', letterSpacing: '0.1em', marginBottom: 4, textTransform: 'uppercase' }}>
@@ -214,7 +223,7 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
 
       {!videoFile && (
         <div style={{ fontSize: 11, color: '#FFC107', marginBottom: 10, lineHeight: 1.45 }}>
-          This card has no attached video file (e.g. loaded from Library), so it can’t be posted. Re-upload the video to post it.
+          This card has no attached media file (e.g. loaded from Library), so it can’t be posted. Re-upload the file to post it.
         </div>
       )}
 
@@ -231,7 +240,7 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
             />
           </div>
           <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>
-            {uploadPct < 100 ? `Uploading video… ${uploadPct}%` : 'Publishing to platforms…'}
+            {uploadPct < 100 ? `Uploading ${isPhoto ? 'photo' : 'video'}… ${uploadPct}%` : 'Publishing to platforms…'}
           </div>
         </div>
       )}

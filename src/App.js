@@ -67,6 +67,7 @@ export default function App() {
     const libraryEntry = {
       id: entry.id,
       filename: entry.filename,
+      mediaType: entry.mediaType ?? 'video',
       frames: { hookFrame: entry.frames?.hookFrame ?? null },
       content: entry.content,
       transcript: entry.transcript ? entry.transcript.slice(0, 5000) : '',
@@ -91,6 +92,7 @@ export default function App() {
   const processFile = useCallback(
     async (queueItem, transcript = '', words = null) => {
       const { id, file } = queueItem;
+      const fallbackMediaType = file.type.startsWith('image/') ? 'photo' : 'video';
       updateQueueItem(id, { status: 'processing', message: 'Starting...' });
 
       try {
@@ -103,6 +105,7 @@ export default function App() {
           id,
           filename: file.name,
           _file: file,
+          mediaType: result.mediaType || fallbackMediaType,
           videoUrl: URL.createObjectURL(file),
           frames: result.frames || {},
           content: result.content,
@@ -121,6 +124,7 @@ export default function App() {
           id,
           filename: file.name,
           _file: file,
+          mediaType: fallbackMediaType,
           videoUrl: URL.createObjectURL(file),
           frames: {},
           content: null,
@@ -232,7 +236,7 @@ export default function App() {
         {results.length > 0 && (
           <div style={{ marginTop: 32 }}>
             <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, letterSpacing: '0.06em', color: '#555', marginBottom: 16 }}>
-              GENERATED CONTENT — {results.length} video{results.length !== 1 ? 's' : ''}
+              GENERATED CONTENT — {results.length} post{results.length !== 1 ? 's' : ''}
             </div>
             {results.map((result) => (
               <VideoCard

@@ -55,7 +55,7 @@ export default function DropZone({ onFilesSelected, processing }) {
     setDragging(false);
     if (processing) return;
     const files = Array.from(e.dataTransfer.files).filter((f) =>
-      f.type.startsWith('video/')
+      f.type.startsWith('video/') || f.type.startsWith('image/')
     );
     if (files.length > 0) onFilesSelected(files.slice(0, 20));
   };
@@ -84,9 +84,9 @@ export default function DropZone({ onFilesSelected, processing }) {
             animation: 'spin 0.8s linear infinite',
           }}
         />
-        <div style={headingStyle}>LOADING YOUR VIDEO…</div>
+        <div style={headingStyle}>LOADING YOUR MEDIA…</div>
         <div style={subStyle}>
-          Reading the video and generating your content. This can take a moment for longer clips —
+          Reading the file and generating your content. This can take a moment for longer clips —
           please keep this tab open.
         </div>
       </div>
@@ -102,9 +102,9 @@ export default function DropZone({ onFilesSelected, processing }) {
       onClick={handleClick}
     >
       <span style={iconStyle}>{icon}</span>
-      <div style={headingStyle}>DROP VIDEOS HERE</div>
+      <div style={headingStyle}>DROP VIDEOS OR PHOTOS HERE</div>
       <div style={subStyle}>
-        Drag &amp; drop up to 20 video files, or click to browse
+        Drag &amp; drop up to 20 videos or photos, or click to browse
       </div>
       <div style={{ fontSize: 12, color: '#555', marginTop: 8, lineHeight: 1.5 }}>
         Tip: long or 4K iPhone videos are large and load slowly, especially from iCloud.
@@ -113,7 +113,7 @@ export default function DropZone({ onFilesSelected, processing }) {
       <input
         ref={inputRef}
         type="file"
-        accept="video/*"
+        accept="video/*,image/*"
         multiple
         style={{ display: 'none' }}
         onChange={handleChange}

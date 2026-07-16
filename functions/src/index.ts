@@ -9,25 +9,33 @@ import * as path from "path";
 
 initializeApp();
 
-const SYSTEM_PROMPT = `You are a TikTok content strategist for The One Percent Nation, a self-help and leadership coaching brand. The creator is Anthony Brown, a Black male leader, real estate broker turned full-time entrepreneur, faith-adjacent, direct communicator, Oklahoma-based. His content pillars are: limiting beliefs, self-accountability, identity and mindset, leadership and purpose. His hook style: second-person identity challenges, truth bombs, direct confrontation of excuses.
+function buildSystemPrompt(isPhoto: boolean): string {
+  const media = isPhoto ? "TikTok photo post" : "TikTok video";
+  const sourceLine = isPhoto
+    ? "When a caption/notes text is provided, use it as the primary source for all fields. Otherwise infer from the still image."
+    : "When a transcript is provided, use it as the primary source for all fields. When only frames are available, infer from visuals.";
+  const summaryFrom = isPhoto ? "the image" : "frames";
 
-When a transcript is provided, use it as the primary source for all fields. When only frames are available, infer from visuals.
+  return `You are a TikTok content strategist for The One Percent Nation, a self-help and leadership coaching brand. The creator is Anthony Brown, a Black male leader, real estate broker turned full-time entrepreneur, faith-adjacent, direct communicator, Oklahoma-based. His content pillars are: limiting beliefs, self-accountability, identity and mindset, leadership and purpose. His hook style: second-person identity challenges, truth bombs, direct confrontation of excuses.
+
+You are generating content for a ${media}. ${sourceLine}
 
 Return ONLY valid JSON with no markdown, no backticks, no preamble. Fields:
-- best_title (string): the single strongest video title — optimized for search and click-through, max 70 chars
-- on_screen_text (string): bold text overlay shown visually in the video — stop-scroll hook, max 8 words, all caps, punchy
+- best_title (string): the single strongest ${isPhoto ? "post" : "video"} title — optimized for search and click-through, max 70 chars
+- on_screen_text (string): bold text overlay shown on the ${isPhoto ? "photo" : "video"} — stop-scroll hook, max 8 words, all caps, punchy
 - niche (string): specific content niche, 2-4 words (e.g. "Entrepreneur Mindset", "Real Estate Motivation", "Self-Discipline")
-- thumbnail_text (string): text to print on the video thumbnail — max 6 words, high contrast, creates curiosity or urgency
-- video_description (string): full video description — 200-400 chars, opens with a hook, body adds context, ends with soft CTA
+- thumbnail_text (string): text to print on the ${isPhoto ? "cover image" : "video thumbnail"} — max 6 words, high contrast, creates curiosity or urgency
+- video_description (string): full ${isPhoto ? "post" : "video"} description — 200-400 chars, opens with a hook, body adds context, ends with soft CTA
 - headline (string): punchy, all-caps title optimized for TikTok search — max 60 chars
-- seo_opener (string): first 3 seconds of spoken text or on-screen text that stops the scroll
+- seo_opener (string): the first line of ${isPhoto ? "on-screen or caption text" : "spoken text or on-screen text"} that stops the scroll
 - caption (string): full TikTok caption including opening line, body, and soft CTA — 150-300 chars
 - hashtags (string): 12-15 hashtags, mix of niche, broad, and trending — space-separated
 - content_pillar (string): one of "Self-Sabotage & Limiting Beliefs", "Accountability & Execution", "Identity & Mindset Shift", "Leadership & Purpose"
 - hook_score (number 1-10): how strong the opening hook is
 - hook_score_reason (string): one sentence explaining the score and one concrete tip to improve it
-- titles (array of 3 strings): alternate video title options, each a different angle
-- transcript_summary (string): 1-2 sentence summary of what the video is about (derive from transcript if provided, otherwise from frames)`;
+- titles (array of 3 strings): alternate ${isPhoto ? "post" : "video"} title options, each a different angle
+- transcript_summary (string): 1-2 sentence summary of what the ${isPhoto ? "photo post" : "video"} is about (derive from provided text if given, otherwise from ${summaryFrom})`;
+}
 
 type Frame = string | null | undefined;
 
@@ -57,25 +65,30 @@ export const analyzeVideo = onRequest(
       return;
     }
 
-    const { frames, transcript, filename } = req.body as {
+    const { frames, transcript, filename, mediaType } = req.body as {
       frames?: { hookFrame?: Frame; midFrame?: Frame; endFrame?: Frame };
       transcript?: string;
       filename?: string;
+      mediaType?: string;
     };
 
-    const contentBlocks: object[] = [
-      ...imageBlock(frames?.hookFrame, "[HOOK FRAME — opening shot]"),
-      ...imageBlock(frames?.midFrame, "[MID FRAME — ~45% through video]"),
-      ...imageBlock(frames?.endFrame, "[END FRAME — ~85% through video]"),
-    ];
+    const isPhoto = mediaType === "photo";
+
+    const contentBlocks: object[] = isPhoto
+      ? imageBlock(frames?.hookFrame, "[PHOTO — the still image being posted]")
+      : [
+          ...imageBlock(frames?.hookFrame, "[HOOK FRAME — opening shot]"),
+          ...imageBlock(frames?.midFrame, "[MID FRAME — ~45% through video]"),
+          ...imageBlock(frames?.endFrame, "[END FRAME — ~85% through video]"),
+        ];
 
     const transcriptSection = transcript?.trim()
-      ? `\n\nVIDEO TRANSCRIPT:\n"""\n${transcript.trim()}\n"""\n`
+      ? `\n\n${isPhoto ? "CAPTION / NOTES" : "VIDEO TRANSCRIPT"}:\n"""\n${transcript.trim()}\n"""\n`
       : "";
 
     contentBlocks.push({
       type: "text",
-      text: `Video filename: "${filename ?? "unknown"}"${transcriptSection}\n\nGenerate the full content strategy JSON as instructed.`,
+      text: `${isPhoto ? "Photo" : "Video"} filename: "${filename ?? "unknown"}"${transcriptSection}\n\nGenerate the full content strategy JSON as instructed.`,
     });
 
     const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
@@ -88,7 +101,7 @@ export const analyzeVideo = onRequest(
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 1800,
-        system: SYSTEM_PROMPT,
+        system: buildSystemPrompt(isPhoto),
         messages: [{ role: "user", content: contentBlocks }],
       }),
     });
@@ -162,6 +175,7 @@ interface PublishBody {
   title?: string;
   platforms?: string[];
   scheduleDate?: string;
+  mediaType?: string;
 }
 
 export const publishPost = onRequest(
@@ -182,7 +196,8 @@ export const publishPost = onRequest(
       return;
     }
 
-    const { mediaUrl, post, title: rawTitle, platforms: rawPlatforms, scheduleDate } = (req.body ?? {}) as PublishBody;
+    const { mediaUrl, post, title: rawTitle, platforms: rawPlatforms, scheduleDate, mediaType } = (req.body ?? {}) as PublishBody;
+    const isPhoto = mediaType === "photo";
 
     const requested = (rawPlatforms ?? []).map((p) => p.toLowerCase());
     const platforms = Array.from(
@@ -193,8 +208,12 @@ export const publishPost = onRequest(
       res.status(400).json({ error: "Select at least one supported platform to post to." });
       return;
     }
+    if (isPhoto && platforms.includes("youtube")) {
+      res.status(400).json({ error: "YouTube only supports video — deselect YouTube to post this photo." });
+      return;
+    }
     if (!mediaUrl || !/^https?:\/\//.test(mediaUrl)) {
-      res.status(400).json({ error: "A valid video URL is required (upload the video first)." });
+      res.status(400).json({ error: "A valid media URL is required (upload the file first)." });
       return;
     }
 
@@ -210,14 +229,14 @@ export const publishPost = onRequest(
       post: postText,
       platforms,
       mediaUrls: [mediaUrl],
-      isVideo: true,
+      isVideo: !isPhoto,
     };
 
     if (platforms.includes("youtube")) {
       body.youTubeOptions = { title, visibility: "public" };
     }
-    if (platforms.includes("instagram")) {
-      // Video posts to Instagram publish as Reels.
+    if (platforms.includes("instagram") && !isPhoto) {
+      // Video posts to Instagram publish as Reels; photos post as regular feed posts.
       body.instagramOptions = { reels: true };
     }
 

@@ -55,9 +55,9 @@ export async function getConnectedAccounts() {
   return data; // { configured, connected: [ids], displayNames: [{platform, displayName}], error? }
 }
 
-export async function publishToSocial(videoFile, { post, title, platforms, scheduleDate, onProgress }) {
-  if (!videoFile) {
-    throw new Error('No video file is attached to this card — regenerate it from an upload to enable posting.');
+export async function publishToSocial(mediaFile, { post, title, platforms, scheduleDate, onProgress }) {
+  if (!mediaFile) {
+    throw new Error('No media file is attached to this card — regenerate it from an upload to enable posting.');
   }
   if (!platforms || platforms.length === 0) {
     throw new Error('Select at least one platform to post to.');
@@ -66,12 +66,13 @@ export async function publishToSocial(videoFile, { post, title, platforms, sched
     throw new Error('Caption is required to publish.');
   }
 
-  const mediaUrl = await uploadVideo(videoFile, onProgress);
+  const mediaType = mediaFile.type?.startsWith('image/') ? 'photo' : 'video';
+  const mediaUrl = await uploadVideo(mediaFile, onProgress);
 
   const response = await fetch('/api/publish', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mediaUrl, post, title, platforms, scheduleDate }),
+    body: JSON.stringify({ mediaUrl, post, title, platforms, scheduleDate, mediaType }),
   });
 
   const data = await response.json().catch(() => ({}));

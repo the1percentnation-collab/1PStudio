@@ -83,7 +83,8 @@ function TitleRow({ title, index }) {
 
 function LibraryCard({ item, onDelete }) {
   const [expanded, setExpanded] = useState(false);
-  const { filename, frames, content, transcript, error, dateAdded } = item;
+  const { filename, frames, content, transcript, error, dateAdded, mediaType } = item;
+  const isPhoto = mediaType === 'photo';
   const pillarColor = content ? (PILLAR_COLORS[content.content_pillar] || '#888') : '#888';
 
   return (
@@ -154,7 +155,7 @@ function LibraryCard({ item, onDelete }) {
           {content ? (
             <>
               {/* PRIMARY FIELDS */}
-              {content.best_title && <Field label="BEST VIDEO TITLE" value={content.best_title} />}
+              {content.best_title && <Field label={isPhoto ? 'BEST POST TITLE' : 'BEST VIDEO TITLE'} value={content.best_title} />}
               {content.on_screen_text && <Field label="ON-SCREEN TEXT" value={content.on_screen_text} />}
               {(content.niche || content.thumbnail_text) && (
                 <div style={{ display: 'flex', gap: 12, marginBottom: 10 }}>
@@ -178,7 +179,7 @@ function LibraryCard({ item, onDelete }) {
                   )}
                 </div>
               )}
-              {content.video_description && <Field label="VIDEO DESCRIPTION" value={content.video_description} />}
+              {content.video_description && <Field label={isPhoto ? 'POST DESCRIPTION' : 'VIDEO DESCRIPTION'} value={content.video_description} />}
               {transcript && <Field label="TRANSCRIPT" value={transcript} muted />}
 
               <div style={{ borderTop: '1px solid #1A1A1A', margin: '12px 0' }} />
@@ -242,7 +243,7 @@ export default function LibraryView({ library, onDelete }) {
           YOUR LIBRARY IS EMPTY
         </div>
         <div style={{ fontSize: 13, color: '#333' }}>
-          Process videos in the Upload tab — they'll be saved here automatically.
+          Process videos or photos in the Composer — they'll be saved here automatically.
         </div>
       </div>
     );
@@ -257,7 +258,7 @@ export default function LibraryView({ library, onDelete }) {
         color: '#555',
         marginBottom: 16,
       }}>
-        VIDEO LIBRARY — {library.length} video{library.length !== 1 ? 's' : ''}
+        CONTENT LIBRARY — {library.length} post{library.length !== 1 ? 's' : ''}
       </div>
       {library.map((item) => (
         <LibraryCard key={item.id} item={item} onDelete={onDelete} />
