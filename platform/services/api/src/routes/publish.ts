@@ -57,10 +57,16 @@ export function registerPublishRoutes(app: FastifyInstance): void {
   });
 
   app.get("/v1/publications", { preHandler: requireAuth }, async (req) => {
+    const { clipId, status } = req.query as { clipId?: string; status?: string };
     const publications = await db.publication.findMany({
-      where: { clip: { project: { workspaceId: req.auth.workspaceId } } },
+      where: {
+        clip: { project: { workspaceId: req.auth.workspaceId } },
+        ...(clipId ? { clipId } : {}),
+        ...(status ? { status: status as "DRAFT" | "SCHEDULED" | "POSTED" | "FAILED" } : {}),
+      },
       orderBy: { createdAt: "desc" },
-      take: 100,
+      take: 200,
+      include: { clip: { select: { title: true, projectId: true } } },
     });
     return { publications };
   });

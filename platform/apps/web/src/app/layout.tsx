@@ -1,11 +1,20 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { CreditChip } from "@/components/CreditChip";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "1P Clip",
   description: "One long video in. Ranked, captioned, vertical clips out.",
 };
+
+const NAV = [
+  { href: "/", label: "New video" },
+  { href: "/projects", label: "Projects" },
+  { href: "/publications", label: "Publishing" },
+  { href: "/credits", label: "Credits" },
+  { href: "/tools/metadata", label: "Metadata tool" },
+];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -16,10 +25,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/" className="text-lg font-black tracking-tight">
               1P <span className="text-gold">CLIP</span>
             </Link>
-            <nav className="flex gap-4 text-sm text-zinc-400">
-              <Link href="/" className="hover:text-zinc-100">New video</Link>
-              <Link href="/projects" className="hover:text-zinc-100">Projects</Link>
+            <nav className="flex flex-1 gap-4 text-sm text-zinc-400">
+              {NAV.map((n) => (
+                <Link key={n.href} href={n.href} className="hover:text-zinc-100">
+                  {n.label}
+                </Link>
+              ))}
             </nav>
+            <CreditChip />
           </div>
         </header>
         <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>

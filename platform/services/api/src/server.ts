@@ -1,6 +1,7 @@
 import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { registerAuthRoutes } from "./auth";
+import { registerBrandRoutes } from "./routes/brands";
 import { registerClipRoutes } from "./routes/clips";
 import { registerCreditRoutes } from "./routes/credits";
 import { registerMetadataRoutes } from "./routes/metadata";
@@ -21,6 +22,7 @@ registerClipRoutes(app);
 registerCreditRoutes(app);
 registerMetadataRoutes(app);
 registerPublishRoutes(app);
+registerBrandRoutes(app);
 
 const port = Number(process.env.API_PORT ?? 3001);
 app.listen({ port, host: "0.0.0.0" }).catch((err) => {

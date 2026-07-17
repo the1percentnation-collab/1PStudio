@@ -59,7 +59,12 @@ export function registerClipRoutes(app: FastifyInstance): void {
    */
   app.patch("/v1/clips/:id/edl", { preHandler: requireAuth }, async (req, reply) => {
     const { id } = req.params as { id: string };
-    const body = (req.body ?? {}) as { ops?: EditOp[]; captionLines?: unknown[]; resolution?: Resolution };
+    const body = (req.body ?? {}) as {
+      ops?: EditOp[];
+      captionLines?: unknown[];
+      captionStyle?: unknown;
+      resolution?: Resolution;
+    };
     const clip = await ownedClip(id, req.auth.workspaceId);
     if (!clip) return reply.code(404).send({ error: "not found" });
     if (!clip.editDecision) return reply.code(409).send({ error: "clip has no edit decision yet" });
@@ -77,8 +82,14 @@ export function registerClipRoutes(app: FastifyInstance): void {
       where: { clipId: clip.id },
       data: { version, ops: (body.ops ?? clip.editDecision.ops) as object, updatedBy: req.auth.userId },
     });
-    if (body.captionLines && clip.captionSet) {
-      await db.captionSet.update({ where: { clipId: clip.id }, data: { lines: body.captionLines as object } });
+    if ((body.captionLines || body.captionStyle) && clip.captionSet) {
+      await db.captionSet.update({
+        where: { clipId: clip.id },
+        data: {
+          ...(body.captionLines ? { lines: body.captionLines as object } : {}),
+          ...(body.captionStyle ? { style: body.captionStyle as object } : {}),
+        },
+      });
     }
 
     const job = await db.job.create({
