@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import PublishPanel from './PublishPanel';
 
 const PILLAR_COLORS = {
-  'Self-Sabotage & Limiting Beliefs': '#E60306',
+  'Self-Sabotage & Limiting Beliefs': '#E63329',
   'Accountability & Execution': '#FF6B00',
   'Identity & Mindset Shift': '#9B59B6',
   'Leadership & Purpose': '#2980B9',
@@ -131,7 +131,7 @@ function TranscriptView({ transcript, isPhoto }) {
             style={{
               background: 'transparent',
               border: 'none',
-              color: '#E60306',
+              color: '#E63329',
               fontSize: 12,
               cursor: 'pointer',
               padding: 0,
@@ -174,7 +174,7 @@ function FrameStrip({ frames, isPhoto }) {
               top: 6,
               left: 6,
               background: 'rgba(0,0,0,0.7)',
-              color: label === 'HOOK' || label === 'PHOTO' ? '#E60306' : '#888',
+              color: label === 'HOOK' || label === 'PHOTO' ? '#E63329' : '#888',
               fontSize: 9,
               fontWeight: 700,
               letterSpacing: '0.1em',
@@ -295,7 +295,7 @@ function TranscriptPanel({ onRegenerate, isRegenerating, initialTranscript, isPh
           onClick={() => onRegenerate(transcript)}
           disabled={isRegenerating || !transcript.trim()}
           style={{
-            background: '#E60306',
+            background: '#E63329',
             color: '#FFF',
             fontSize: 13,
             fontWeight: 600,
@@ -460,7 +460,7 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished,
               lineHeight: 1.5,
               marginBottom: 14,
             }}>
-              <span style={{ color: '#E60306', fontWeight: 600 }}>Tip: </span>
+              <span style={{ color: '#E63329', fontWeight: 600 }}>Tip: </span>
               {content.hook_score_reason}
             </div>
           )}
@@ -479,7 +479,7 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished,
           <button
             onClick={() => navigator.clipboard.writeText(buildAllText()).catch(() => {})}
             style={{
-              background: '#E60306',
+              background: '#E63329',
               color: '#FFF',
               fontSize: 13,
               fontWeight: 600,
@@ -520,7 +520,7 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished,
               cursor: 'pointer',
               transition: 'border-color 0.2s',
             }}
-            onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#E60306')}
+            onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#E63329')}
             onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#333')}
           >
             ✂️ Edit Video
@@ -542,7 +542,7 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished,
             opacity: isRegenerating ? 0.5 : 1,
             transition: 'border-color 0.2s',
           }}
-          onMouseEnter={(e) => !isRegenerating && (e.currentTarget.style.borderColor = '#E60306')}
+          onMouseEnter={(e) => !isRegenerating && (e.currentTarget.style.borderColor = '#E63329')}
           onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#333')}
         >
           Regenerate

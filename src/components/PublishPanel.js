@@ -224,7 +224,7 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
           type="checkbox"
           checked={scheduleOn}
           onChange={(e) => setScheduleOn(e.target.checked)}
-          style={{ accentColor: '#E60306', width: 15, height: 15 }}
+          style={{ accentColor: '#E63329', width: 15, height: 15 }}
         />
         Schedule for later
       </label>

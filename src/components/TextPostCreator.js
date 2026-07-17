@@ -15,7 +15,7 @@ const FONTS = [
   { family: 'Caveat', weight: 700 },
 ];
 
-const TEXT_SWATCHES = ['#FFFFFF', '#000000', '#E60306', '#FFC107'];
+const TEXT_SWATCHES = ['#FFFFFF', '#000000', '#E63329', '#FFC107'];
 
 const labelStyle = {
   display: 'block',
@@ -41,8 +41,8 @@ function Chip({ active, onClick, children, style }) {
     <button
       onClick={onClick}
       style={{
-        background: active ? '#E6030622' : '#111',
-        border: `1px solid ${active ? '#E60306' : '#333'}`,
+        background: active ? '#E6332922' : '#111',
+        border: `1px solid ${active ? '#E63329' : '#333'}`,
         color: active ? '#FFF' : '#999',
         fontSize: 12,
         fontWeight: 600,
@@ -68,7 +68,7 @@ function Swatch({ color, gradient, active, onClick }) {
         height: 26,
         borderRadius: '50%',
         background: gradient ? `linear-gradient(135deg, ${gradient.join(', ')})` : color,
-        border: active ? '2px solid #E60306' : '2px solid #333',
+        border: active ? '2px solid #E63329' : '2px solid #333',
         cursor: 'pointer',
         padding: 0,
         flexShrink: 0,
@@ -227,7 +227,7 @@ export default function TextPostCreator({ onCreate, onClose }) {
       {/* HEADER */}
       <div style={{ height: 56, display: 'flex', alignItems: 'center', gap: 14, padding: '0 16px', borderBottom: '1px solid #1A1A1A', flexShrink: 0 }}>
         <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, letterSpacing: '0.04em' }}>
-          <span style={{ color: '#E60306' }}>TEXT</span>
+          <span style={{ color: '#E63329' }}>TEXT</span>
           <span style={{ color: '#FFF', marginLeft: 6 }}>POST</span>
         </div>
         <div style={{ flex: 1 }} />
@@ -235,7 +235,7 @@ export default function TextPostCreator({ onCreate, onClose }) {
           onClick={onClose}
           aria-label="Close"
           style={{ width: 32, height: 32, borderRadius: 8, background: '#1A1A1A', border: '1px solid #333', color: '#CCC', fontSize: 15, cursor: 'pointer' }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#E60306')}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#E63329')}
           onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#333')}
         >
           ✕
@@ -365,8 +365,8 @@ export default function TextPostCreator({ onCreate, onClose }) {
                     key={family}
                     onClick={() => patch({ font: family, weight })}
                     style={{
-                      background: active ? '#E6030622' : '#0A0A0A',
-                      border: `1px solid ${active ? '#E60306' : '#2A2A2A'}`,
+                      background: active ? '#E6332922' : '#0A0A0A',
+                      border: `1px solid ${active ? '#E63329' : '#2A2A2A'}`,
                       borderRadius: 8,
                       padding: '8px 10px',
                       cursor: 'pointer',
@@ -374,7 +374,7 @@ export default function TextPostCreator({ onCreate, onClose }) {
                     }}
                   >
                     <div style={{ fontFamily: `'${family}', sans-serif`, fontWeight: weight, fontSize: 17, color: '#FFF', lineHeight: 1.2 }}>Aa</div>
-                    <div style={{ fontSize: 9, color: active ? '#E60306' : '#666', marginTop: 3, letterSpacing: '0.04em' }}>{family}</div>
+                    <div style={{ fontSize: 9, color: active ? '#E63329' : '#666', marginTop: 3, letterSpacing: '0.04em' }}>{family}</div>
                   </button>
                 );
               })}
@@ -391,7 +391,7 @@ export default function TextPostCreator({ onCreate, onClose }) {
               step={0.002}
               value={textEl.size}
               onChange={(e) => patch({ size: parseFloat(e.target.value) })}
-              style={{ width: '100%', accentColor: '#E60306' }}
+              style={{ width: '100%', accentColor: '#E63329' }}
             />
           </div>
 
@@ -472,7 +472,7 @@ export default function TextPostCreator({ onCreate, onClose }) {
             fontFamily: "'Bebas Neue', sans-serif",
             fontSize: 17,
             letterSpacing: '0.06em',
-            background: canCreate ? '#E60306' : '#333',
+            background: canCreate ? '#E63329' : '#333',
             color: canCreate ? '#FFF' : '#777',
             border: 'none',
             borderRadius: 9,

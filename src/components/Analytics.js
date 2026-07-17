@@ -2,7 +2,7 @@ import React from 'react';
 import { SOCIAL_PLATFORMS } from '../services/socialService';
 
 const PLATFORM_LABELS = Object.fromEntries(SOCIAL_PLATFORMS.map((p) => [p.id, p.label]));
-const PALETTE = ['#E60306', '#FF6B00', '#9B59B6', '#2980B9', '#00C48C', '#FFC107', '#1ABC9C', '#E84393'];
+const PALETTE = ['#E63329', '#FF6B00', '#9B59B6', '#2980B9', '#00C48C', '#FFC107', '#1ABC9C', '#E84393'];
 
 /* ---------- chart primitives (pure SVG, no deps) ---------- */
 
@@ -46,7 +46,7 @@ function Donut({ segments, size = 150, thickness = 20, centerLabel, centerSub })
   );
 }
 
-function Gauge({ value, max = 10, size = 150, thickness = 16, label, accent = '#E60306' }) {
+function Gauge({ value, max = 10, size = 150, thickness = 16, label, accent = '#E63329' }) {
   const r = (size - thickness) / 2;
   const c = 2 * Math.PI * r;
   const arc = 0.75 * c; // 270° sweep
@@ -72,7 +72,7 @@ function Gauge({ value, max = 10, size = 150, thickness = 16, label, accent = '#
   );
 }
 
-function AreaChart({ data, height = 180, accent = '#E60306', gradientId = 'areaFill' }) {
+function AreaChart({ data, height = 180, accent = '#E63329', gradientId = 'areaFill' }) {
   const W = 600;
   const H = height;
   const padX = 8;
@@ -227,7 +227,7 @@ function WeekdayBars({ counts }) {
         const yPos = H - padBottom - h;
         return (
           <g key={i}>
-            <rect x={xPos} y={yPos} width={barW} height={h} rx="3" fill={c > 0 && i === maxIdx ? '#E60306' : '#2A2A2A'} />
+            <rect x={xPos} y={yPos} width={barW} height={h} rx="3" fill={c > 0 && i === maxIdx ? '#E63329' : '#2A2A2A'} />
             {c > 0 && (
               <text x={xPos + barW / 2} y={yPos - 5} textAnchor="middle" fontSize="10" fill="#888">{c}</text>
             )}
@@ -308,7 +308,7 @@ export default function Analytics({ library, posts }) {
         <MetricPill label="Published" value={published.length} accent="#00C48C" />
         <MetricPill label="Scheduled" value={scheduled.length} accent="#FFC107" />
         <MetricPill label="Platforms Used" value={distinctPlatforms} accent="#2980B9" />
-        <MetricPill label="Content Pieces" value={library.length} accent="#E60306" />
+        <MetricPill label="Content Pieces" value={library.length} accent="#E63329" />
       </div>
 
       {/* CHART ROW */}

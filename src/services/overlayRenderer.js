@@ -8,7 +8,7 @@
 
 import { groupWordsIntoCaptions, getActiveCaption } from './captionUtils';
 
-const BRAND_RED = '#E60306';
+const BRAND_RED = '#E63329';
 
 let textIdCounter = 0;
 

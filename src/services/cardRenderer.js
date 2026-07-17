@@ -9,14 +9,14 @@ export const CARD_PRESETS = {
   square:   { w: 1080, h: 1080, label: 'SQUARE 1:1' },
 };
 
-export const SOLID_BGS = ['#0A0A0A', '#111111', '#E60306', '#FFFFFF', '#FFC107', '#1E3A8A'];
+export const SOLID_BGS = ['#0A0A0A', '#111111', '#E63329', '#FFFFFF', '#FFC107', '#1E3A8A'];
 
 export const GRADIENTS = [
-  { id: 'brand',    stops: ['#E60306', '#5A0102'] },
+  { id: 'brand',    stops: ['#E63329', '#5A0102'] },
   { id: 'sunset',   stops: ['#F58529', '#DD2A7B', '#8134AF'] },
   { id: 'midnight', stops: ['#0F0C29', '#302B63', '#24243E'] },
   { id: 'ocean',    stops: ['#0575E6', '#021B79'] },
-  { id: 'ember',    stops: ['#1A1A1A', '#E60306'] },
+  { id: 'ember',    stops: ['#1A1A1A', '#E63329'] },
 ];
 
 // background: { type: 'solid', color } | { type: 'gradient', stops: [...] }

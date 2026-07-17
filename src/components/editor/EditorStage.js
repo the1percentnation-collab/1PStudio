@@ -75,7 +75,7 @@ export default function EditorStage({
             .find((r) => r.id === selectedRef.current);
           if (b) {
             ctx.save();
-            ctx.strokeStyle = '#E60306';
+            ctx.strokeStyle = '#E63329';
             ctx.lineWidth = Math.max(2, canvas.width * 0.003);
             ctx.setLineDash([canvas.width * 0.012, canvas.width * 0.008]);
             ctx.strokeRect(b.x, b.y, b.w, b.h);

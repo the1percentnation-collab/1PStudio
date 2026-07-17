@@ -35,7 +35,7 @@ function DayDetail({ date, posts, onClose, onNavigate, isMobile }) {
           <div style={{ fontSize: 13, color: '#555', marginBottom: 12 }}>Nothing scheduled for this day</div>
           <button
             onClick={() => onNavigate('composer')}
-            style={{ background: '#E60306', color: '#FFF', fontSize: 13, fontWeight: 700, padding: '9px 18px', borderRadius: 9, border: 'none', cursor: 'pointer' }}
+            style={{ background: '#E63329', color: '#FFF', fontSize: 13, fontWeight: 700, padding: '9px 18px', borderRadius: 9, border: 'none', cursor: 'pointer' }}
           >
             + Schedule a Post
           </button>
@@ -175,8 +175,8 @@ export default function CalendarView({ posts, onNavigate, isMobile = false }) {
               style={{
                 minHeight: cellMinH,
                 background: isSelected ? '#161010' : '#111',
-                border: `1px solid ${isToday ? '#E60306' : isHovered ? '#333' : '#1A1A1A'}`,
-                boxShadow: isSelected ? '0 0 0 1px #E60306' : 'none',
+                border: `1px solid ${isToday ? '#E63329' : isHovered ? '#333' : '#1A1A1A'}`,
+                boxShadow: isSelected ? '0 0 0 1px #E63329' : 'none',
                 borderRadius: 10,
                 padding: isMobile ? 5 : 8,
                 display: 'flex',
@@ -190,7 +190,7 @@ export default function CalendarView({ posts, onNavigate, isMobile = false }) {
               <div style={{
                 fontSize: 12,
                 fontWeight: isToday ? 700 : 500,
-                color: isToday ? '#E60306' : '#888',
+                color: isToday ? '#E63329' : '#888',
                 marginBottom: 2,
               }}>
                 {date.getDate()}
@@ -246,7 +246,7 @@ export default function CalendarView({ posts, onNavigate, isMobile = false }) {
         </span>
         <button
           onClick={() => onNavigate('composer')}
-          style={{ marginLeft: 'auto', background: '#E60306', color: '#FFF', fontSize: 13, fontWeight: 700, padding: '9px 18px', borderRadius: 9, cursor: 'pointer' }}
+          style={{ marginLeft: 'auto', background: '#E63329', color: '#FFF', fontSize: 13, fontWeight: 700, padding: '9px 18px', borderRadius: 9, cursor: 'pointer' }}
         >
           + Schedule a Post
         </button>

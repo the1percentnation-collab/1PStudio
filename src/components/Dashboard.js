@@ -1,32 +1,13 @@
 import React from 'react';
 import { SOCIAL_PLATFORMS } from '../services/socialService';
+import { colors as c, fonts as f, radius as r } from '../theme';
+import { Eyebrow, Display, Red, SectionTitle, StatCard, Card, Button } from './ui';
 
 const PLATFORM_LABELS = Object.fromEntries(SOCIAL_PLATFORMS.map((p) => [p.id, p.label]));
 
-function StatCard({ label, value, sub, accent }) {
-  return (
-    <div style={{
-      flex: 1,
-      minWidth: 160,
-      background: '#111',
-      border: '1px solid #1A1A1A',
-      borderRadius: 14,
-      padding: '18px 20px',
-    }}>
-      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', color: '#666', textTransform: 'uppercase', marginBottom: 10 }}>
-        {label}
-      </div>
-      <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 40, lineHeight: 1, color: accent || '#FFF' }}>
-        {value}
-      </div>
-      {sub && <div style={{ fontSize: 12, color: '#555', marginTop: 6 }}>{sub}</div>}
-    </div>
-  );
-}
-
 function StatusDot({ status }) {
-  const color = status === 'published' ? '#00C48C' : status === 'scheduled' ? '#FFC107' : '#FF4444';
-  return <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0 }} />;
+  const color = status === 'published' ? c.success : status === 'scheduled' ? c.warn : c.danger;
+  return <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0, boxShadow: `0 0 8px ${color}` }} />;
 }
 
 export default function Dashboard({ library, posts, onNavigate }) {
@@ -42,117 +23,80 @@ export default function Dashboard({ library, posts, onNavigate }) {
 
   return (
     <div>
-      {/* WELCOME / CTA */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: 16,
-        background: 'linear-gradient(135deg, rgba(230,3,6,0.14), rgba(230,3,6,0.02))',
-        border: '1px solid #2A1012',
-        borderRadius: 16,
-        padding: '22px 24px',
-        marginBottom: 24,
-      }}>
-        <div>
-          <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 26, letterSpacing: '0.04em', color: '#FFF' }}>
-            WELCOME BACK
-          </div>
-          <div style={{ fontSize: 13, color: '#999', marginTop: 4 }}>
-            Generate, schedule, and publish content across all your platforms.
-          </div>
-        </div>
-        <button
-          onClick={() => onNavigate('composer')}
-          style={{
-            background: '#E60306',
-            color: '#FFF',
-            fontSize: 14,
-            fontWeight: 700,
-            padding: '12px 22px',
-            borderRadius: 10,
-            whiteSpace: 'nowrap',
-            transition: 'opacity 0.2s',
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.opacity = '0.88')}
-          onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}
-        >
-          + New Post
-        </button>
+      {/* HERO */}
+      <Eyebrow style={{ marginBottom: 14 }}>Content Studio</Eyebrow>
+      <Display size={52} style={{ marginBottom: 10 }}>
+        Welcome back, <Red>Anthony.</Red>
+      </Display>
+      <div style={{ fontFamily: f.mono, fontSize: 12.5, letterSpacing: '0.14em', textTransform: 'uppercase', color: c.textFaint, marginBottom: 28 }}>
+        Redefining Success. <span style={{ color: c.textGhost }}>Realigning Purpose.</span>
       </div>
 
+      {/* HERO CTA CARD */}
+      <Card accent pad={24} style={{ marginBottom: 30, background: `linear-gradient(120deg, ${c.redGlow}, transparent 60%), ${c.surface}` }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+          <div>
+            <Eyebrow style={{ marginBottom: 10 }}>Start creating</Eyebrow>
+            <SectionTitle size={26} style={{ marginBottom: 6 }}>Turn ideas into posts</SectionTitle>
+            <div style={{ fontSize: 13.5, color: c.textDim, maxWidth: 460, lineHeight: 1.5 }}>
+              Generate, clip, schedule, and publish content across every platform — the work starts when you choose.
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <Button onClick={() => onNavigate('composer')}>+ New Post</Button>
+            <Button variant="ghost" onClick={() => onNavigate('clips')}>Clip a video →</Button>
+          </div>
+        </div>
+      </Card>
+
       {/* STATS */}
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 28 }}>
-        <StatCard label="Content Pieces" value={library.length} sub="In your library" />
-        <StatCard label="Published" value={published.length} sub="Posts sent out" accent="#00C48C" />
-        <StatCard label="Scheduled" value={scheduled.length} sub="Upcoming posts" accent="#FFC107" />
-        <StatCard label="Avg Hook Score" value={avgHook} sub="Across library" accent="#E60306" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 34 }}>
+        <StatCard value={library.length} label="Content Pieces" note="In your library" />
+        <StatCard value={published.length} suffix="" label="Published" note="Posts sent out" />
+        <StatCard value={scheduled.length} label="Scheduled" note="Upcoming posts" />
+        <StatCard value={avgHook} label="Avg Hook Score" note="Across library" />
       </div>
 
       {/* RECENT ACTIVITY */}
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 14 }}>
-        <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, letterSpacing: '0.05em', color: '#888' }}>
-          RECENT ACTIVITY
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <Eyebrow dash dot={false}>Recent Activity</Eyebrow>
         <button
           onClick={() => onNavigate('posts')}
-          style={{ background: 'transparent', border: 'none', color: '#888', fontSize: 12, cursor: 'pointer', padding: 0 }}
+          style={{ background: 'transparent', border: 'none', color: c.textDim, fontFamily: f.mono, fontSize: 11.5, letterSpacing: '0.12em', textTransform: 'uppercase', cursor: 'pointer', padding: 0 }}
         >
           View all →
         </button>
       </div>
 
       {recent.length === 0 ? (
-        <div style={{
-          background: '#0E0E0E',
-          border: '1px dashed #1F1F1F',
-          borderRadius: 14,
-          padding: '48px 24px',
-          textAlign: 'center',
-          color: '#444',
-        }}>
-          <div style={{ fontSize: 14, marginBottom: 4 }}>No posts yet</div>
-          <div style={{ fontSize: 12, color: '#333' }}>Publish from the Composer and your activity shows up here.</div>
+        <div style={{ background: c.inset, border: `1px dashed ${c.border}`, borderRadius: r.lg, padding: '52px 24px', textAlign: 'center' }}>
+          <div style={{ fontSize: 14, color: c.textDim, marginBottom: 4 }}>No posts yet</div>
+          <div style={{ fontSize: 12.5, color: c.textFaint }}>Publish from the Composer and your activity shows up here.</div>
         </div>
       ) : (
-        <div style={{ background: '#111', border: '1px solid #1A1A1A', borderRadius: 14, overflow: 'hidden' }}>
+        <Card pad={0}>
           {recent.map((p, i) => (
-            <div
-              key={p.id}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                padding: '13px 18px',
-                borderTop: i === 0 ? 'none' : '1px solid #1A1A1A',
-              }}
-            >
+            <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 20px', borderTop: i === 0 ? 'none' : `1px solid ${c.border}` }}>
               <StatusDot status={p.status} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, color: '#DDD', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ fontSize: 13.5, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {p.caption || p.title || p.filename || 'Untitled post'}
                 </div>
-                <div style={{ fontSize: 11, color: '#555', marginTop: 3 }}>
+                <div style={{ fontSize: 11, color: c.textFaint, marginTop: 3 }}>
                   {(p.platforms || []).map((id) => PLATFORM_LABELS[id] || id).join(' · ')}
                 </div>
               </div>
               <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                <div style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: '0.08em',
-                  textTransform: 'uppercase',
-                  color: p.status === 'published' ? '#00C48C' : p.status === 'scheduled' ? '#FFC107' : '#FF4444',
-                }}>
+                <div style={{ fontFamily: f.mono, fontSize: 10, fontWeight: 500, letterSpacing: '0.14em', textTransform: 'uppercase', color: p.status === 'published' ? c.success : p.status === 'scheduled' ? c.warn : c.danger }}>
                   {p.status}
                 </div>
-                <div style={{ fontSize: 11, color: '#555', marginTop: 3 }}>
+                <div style={{ fontSize: 11, color: c.textFaint, marginTop: 3 }}>
                   {new Date(p.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                 </div>
               </div>
             </div>
           ))}
-        </div>
+        </Card>
       )}
     </div>
   );
