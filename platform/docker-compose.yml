@@ -86,7 +86,16 @@ services:
       echo buckets-ready"
 
   ml:
-    build: ./services/ml
+    build:
+      context: ./services/ml
+      network: host
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${HTTP_PROXY:-}
+        https_proxy: ${HTTPS_PROXY:-}
+        no_proxy: ${NO_PROXY:-}
     environment:
       REDIS_URL: redis://redis:6379
       S3_ENDPOINT: http://minio:9000
@@ -103,7 +112,17 @@ services:
       - "8000:8000"
 
   render:
-    build: ./services/render
+    build:
+      context: .
+      dockerfile: services/render/Dockerfile
+      network: host
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${HTTP_PROXY:-}
+        https_proxy: ${HTTPS_PROXY:-}
+        no_proxy: ${NO_PROXY:-}
     environment:
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: onepct
@@ -118,6 +137,14 @@ services:
     build:
       context: .
       dockerfile: services/orchestrator/Dockerfile
+      network: host
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${HTTP_PROXY:-}
+        https_proxy: ${HTTPS_PROXY:-}
+        no_proxy: ${NO_PROXY:-}
     environment:
       DATABASE_URL: postgresql://onepct:onepct@postgres:5432/onepct
       TEMPORAL_ADDRESS: temporal:7233
@@ -138,6 +165,14 @@ services:
     build:
       context: .
       dockerfile: services/api/Dockerfile
+      network: host
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${HTTP_PROXY:-}
+        https_proxy: ${HTTPS_PROXY:-}
+        no_proxy: ${NO_PROXY:-}
     environment:
       DATABASE_URL: postgresql://onepct:onepct@postgres:5432/onepct
       TEMPORAL_ADDRESS: temporal:7233

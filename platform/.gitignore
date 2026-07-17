@@ -10,3 +10,4 @@ __pycache__/
 media/
 *.local
 .DS_Store
+build-certs/*.crt
