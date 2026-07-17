@@ -87,7 +87,8 @@ services:
 
   ml:
     build:
-      context: ./services/ml
+      context: .
+      dockerfile: services/ml/Dockerfile
       network: host
       args:
         HTTP_PROXY: ${HTTP_PROXY:-}
