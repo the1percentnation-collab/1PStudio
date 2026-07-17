@@ -34,8 +34,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Generate Prisma client
-        run: pnpm --filter @onepct/db generate
+      # Consumers resolve @onepct/shared and @onepct/db via their built dist/,
+      # so the workspace libraries must be built (and Prisma generated) before
+      # any service is typechecked.
+      - name: Build workspace libraries
+        run: pnpm --filter @onepct/shared build && pnpm --filter @onepct/db build
 
       - name: Typecheck all packages
         run: pnpm -r typecheck
