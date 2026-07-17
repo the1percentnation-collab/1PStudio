@@ -733,3 +733,191 @@ export const transcribeAudio = onRequest(
     }
   }
 );
+
+// ---------------------------------------------------------------------------
+// Clip selection — turns ONE long video into several short, ranked clips.
+// Given the word-timed transcript, Claude picks the strongest self-contained
+// moments (start/end + title + hook score + brand-voice caption/hashtags).
+// Best-effort: when ANTHROPIC_API_KEY is unset OR the model call fails, it
+// falls back to a deterministic even-split so the Clips flow always works.
+// ---------------------------------------------------------------------------
+
+interface TWord { w: string; s: number; e: number }
+interface Clip {
+  startSec: number;
+  endSec: number;
+  title: string;
+  hookScore: number;
+  reason: string;
+  onScreenText: string;
+  caption: string;
+  hashtags: string;
+}
+
+// Group words into timestamped sentence-ish segments for the selection prompt.
+function segmentsForPrompt(words: TWord[]): { start: number; end: number; text: string }[] {
+  const segs: { start: number; end: number; text: string }[] = [];
+  let cur: TWord[] = [];
+  const flush = () => {
+    if (!cur.length) return;
+    segs.push({ start: cur[0].s, end: cur[cur.length - 1].e, text: cur.map((w) => w.w).join(" ") });
+    cur = [];
+  };
+  for (const w of words) {
+    cur.push(w);
+    const dur = w.e - cur[0].s;
+    if (/[.!?]$/.test(w.w) || cur.length >= 40 || dur > 14) flush();
+  }
+  flush();
+  return segs;
+}
+
+// Deterministic fallback: evenly-spaced, boundary-snapped windows.
+function fallbackClips(words: TWord[], clipCount: number, minSec: number, maxSec: number): Clip[] {
+  if (!words.length) return [];
+  const total = words[words.length - 1].e;
+  const target = Math.min(maxSec, Math.max(minSec, (minSec + maxSec) / 2));
+  const n = Math.max(1, Math.min(clipCount, Math.floor(total / target) || 1));
+  const clips: Clip[] = [];
+  for (let i = 0; i < n; i++) {
+    const center = (total * (i + 0.5)) / n;
+    const start = Math.max(0, center - target / 2);
+    const end = Math.min(total, start + target);
+    const win = words.filter((w) => w.s >= start && w.e <= end);
+    const snapStart = win[0]?.s ?? start;
+    const snapEnd = win[win.length - 1]?.e ?? end;
+    const text = win.slice(0, 12).map((w) => w.w).join(" ");
+    const title = (text.replace(/[.!?,]+$/, "").slice(0, 60) || `Clip ${i + 1}`).replace(/^\w/, (c) => c.toUpperCase());
+    clips.push({
+      startSec: Math.round(snapStart * 100) / 100,
+      endSec: Math.round(snapEnd * 100) / 100,
+      title,
+      hookScore: 5,
+      reason: "Auto-selected by even split (AI selection unavailable).",
+      onScreenText: title.toUpperCase().split(" ").slice(0, 6).join(" "),
+      caption: `${title} #1PNation`,
+      hashtags: "#mindset #discipline #accountability #entrepreneur #motivation #1percent #fyp",
+    });
+  }
+  return clips;
+}
+
+const CLIP_SYSTEM_PROMPT = `You are a short-form video clip producer for The One Percent Nation (creator Anthony Brown — self-help/leadership, direct second-person hooks, truth bombs, confronting excuses). You are given a long video's transcript with per-segment timestamps. Select the strongest self-contained CLIPS for TikTok/Reels/Shorts.
+
+Rules:
+- Each clip must start and end at the given segment boundaries (use the timestamps), be self-contained, and open with a strong hook.
+- Respect the requested clip count and the min/max length window; clips must NOT overlap.
+- Rank by viral potential.
+
+Return ONLY valid JSON, no markdown/backticks, shaped exactly:
+{ "clips": [ {
+  "startSec": number, "endSec": number,
+  "title": string (max 70 chars),
+  "hookScore": number (1-10),
+  "reason": string (one sentence: why it works + one improvement tip),
+  "onScreenText": string (bold stop-scroll overlay, max 8 words, ALL CAPS),
+  "caption": string (full TikTok caption, 150-300 chars, soft CTA),
+  "hashtags": string (12-15 space-separated hashtags)
+} ] }`;
+
+function normalizeClips(raw: unknown, words: TWord[], clipCount: number): Clip[] {
+  const total = words.length ? words[words.length - 1].e : 0;
+  const arr = Array.isArray((raw as { clips?: unknown[] })?.clips) ? (raw as { clips: Record<string, unknown>[] }).clips : [];
+  const clips = arr
+    .map((c): Clip | null => {
+      const startSec = Number(c.startSec);
+      const endSec = Number(c.endSec);
+      if (!Number.isFinite(startSec) || !Number.isFinite(endSec) || endSec <= startSec) return null;
+      return {
+        startSec: Math.max(0, startSec),
+        endSec: Math.min(total || endSec, endSec),
+        title: String(c.title ?? "Clip").slice(0, 70),
+        hookScore: typeof c.hookScore === "number" ? Math.max(1, Math.min(10, c.hookScore)) : 5,
+        reason: String(c.reason ?? ""),
+        onScreenText: String(c.onScreenText ?? c.title ?? "").slice(0, 60),
+        caption: String(c.caption ?? ""),
+        hashtags: String(c.hashtags ?? ""),
+      };
+    })
+    .filter((c): c is Clip => c !== null)
+    .sort((a, b) => b.hookScore - a.hookScore)
+    .slice(0, clipCount);
+  return clips;
+}
+
+export const selectClips = onRequest(
+  {
+    cors: true,
+    timeoutSeconds: 120,
+    memory: "512MiB",
+  },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+
+    const { words: rawWords, clipCount: rawCount, minSec: rawMin, maxSec: rawMax, filename } =
+      (req.body ?? {}) as {
+        words?: TWord[];
+        clipCount?: number;
+        minSec?: number;
+        maxSec?: number;
+        filename?: string;
+      };
+
+    const words = (Array.isArray(rawWords) ? rawWords : []).filter(
+      (w) => w && typeof w.s === "number" && typeof w.e === "number" && typeof w.w === "string"
+    );
+    const clipCount = Math.max(1, Math.min(10, Math.round(rawCount ?? 5)));
+    const minSec = Math.max(5, rawMin ?? 15);
+    const maxSec = Math.max(minSec + 5, rawMax ?? 60);
+
+    if (words.length === 0) {
+      // Nothing to clip without speech timings.
+      res.status(200).json({ clips: [], configured: !!process.env.ANTHROPIC_API_KEY, reason: "no-speech" });
+      return;
+    }
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      res.status(200).json({ clips: fallbackClips(words, clipCount, minSec, maxSec), configured: false });
+      return;
+    }
+
+    try {
+      const segs = segmentsForPrompt(words);
+      const segLines = segs.map((s) => `[${s.start.toFixed(1)}-${s.end.toFixed(1)}] ${s.text}`).join("\n");
+      const total = words[words.length - 1].e;
+      const userText = `Video: "${filename ?? "video"}" (${total.toFixed(0)}s). Produce ${clipCount} clips, each ${minSec}-${maxSec}s.\n\nTranscript segments:\n${segLines}`;
+
+      const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-6",
+          max_tokens: 3000,
+          system: CLIP_SYSTEM_PROMPT,
+          messages: [{ role: "user", content: userText }],
+        }),
+      });
+
+      if (!anthropicRes.ok) {
+        res.status(200).json({ clips: fallbackClips(words, clipCount, minSec, maxSec), configured: true, degraded: true });
+        return;
+      }
+      const data = (await anthropicRes.json()) as { content?: { text?: string }[] };
+      const text = data.content?.[0]?.text ?? "";
+      const match = text.match(/\{[\s\S]*\}/);
+      const parsed = JSON.parse(match ? match[0] : text);
+      const clips = normalizeClips(parsed, words, clipCount);
+      res.json({ clips: clips.length ? clips : fallbackClips(words, clipCount, minSec, maxSec), configured: true });
+    } catch {
+      res.status(200).json({ clips: fallbackClips(words, clipCount, minSec, maxSec), configured: true, degraded: true });
+    }
+  }
+);

@@ -45,6 +45,11 @@
         "region": "us-central1"
       },
       {
+        "source": "/api/clips",
+        "function": "selectClips",
+        "region": "us-central1"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }
