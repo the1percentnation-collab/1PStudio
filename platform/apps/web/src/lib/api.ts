@@ -43,10 +43,32 @@ export interface ClipInfo {
   renders: RenderInfo[];
 }
 
+export interface CaptionLine {
+  startSec: number;
+  endSec: number;
+  text: string;
+  words?: { word: string; startSec: number; endSec: number }[];
+  emphasis?: string[];
+}
+
 export interface ClipDetail extends Omit<ClipInfo, "editVersion"> {
   contentMetadata?: Record<string, unknown> | null;
-  edl: { version: number; ops: unknown[] } | null;
-  captions: { language: string; lines: { startSec: number; endSec: number; text: string }[]; style?: unknown } | null;
+  edl: { version: number; ops: EditOpLike[] } | null;
+  captions: { language: string; lines: CaptionLine[]; style?: CaptionStyleLike | null } | null;
+}
+
+export type EditOpLike = { kind: string; [k: string]: unknown };
+
+export interface CaptionStyleLike {
+  fontFamily?: string;
+  fontSizePx?: number;
+  primaryColor?: string;
+  highlightColor?: string;
+  outlineColor?: string;
+  outlinePx?: number;
+  marginVPct?: number;
+  allCaps?: boolean;
+  karaoke?: boolean;
 }
 
 export interface ProjectInfo {
@@ -59,12 +81,62 @@ export interface ProjectInfo {
   job?: { id: string; stage: string | null; stageStatus: Record<string, { status: string }> };
 }
 
+export interface Publication {
+  id: string;
+  clipId: string;
+  platform: string;
+  title?: string | null;
+  description?: string | null;
+  hashtags?: string | null;
+  scheduledAt?: string | null;
+  status: string;
+  createdAt: string;
+  clip?: { title: string; projectId: string };
+}
+
+export interface LedgerEntry {
+  id: string;
+  delta: number;
+  reason: string;
+  stage?: string | null;
+  createdAt: string;
+}
+
+export interface BrandTemplate {
+  id: string;
+  name: string;
+  isDefault: boolean;
+}
+
+export interface EstimateResult {
+  estimate: number;
+  rates: {
+    stages: Record<string, number>;
+    resolutionMultiplier: Record<string, number>;
+    addons: Record<string, number>;
+  };
+}
+
 export const api = {
+  // reads
   projects: () => call<{ projects: ProjectInfo[] }>("/v1/projects"),
   project: (id: string) => call<ProjectInfo & { sourceVideo?: unknown }>(`/v1/projects/${id}`),
   projectClips: (id: string) => call<{ clips: ClipInfo[] }>(`/v1/projects/${id}/clips`),
   clip: (id: string) => call<ClipDetail>(`/v1/clips/${id}`),
-  balance: () => call<{ balance: number; plan: { id: string } }>("/v1/credits/balance"),
+  balance: () => call<{ balance: number; plan: { id: string; monthlyCredits: number | null } }>("/v1/credits/balance"),
+  ledger: () => call<{ entries: LedgerEntry[] }>("/v1/credits/ledger"),
+  estimate: (durationSec: number, clipCount: number, resolution: string) =>
+    call<EstimateResult>(`/v1/credits/estimate?durationSec=${durationSec}&clipCount=${clipCount}&resolution=${resolution}`),
+  brandTemplates: () => call<{ templates: BrandTemplate[] }>("/v1/brand-templates"),
+  publications: (opts?: { clipId?: string; status?: string }) => {
+    const q = new URLSearchParams();
+    if (opts?.clipId) q.set("clipId", opts.clipId);
+    if (opts?.status) q.set("status", opts.status);
+    const qs = q.toString();
+    return call<{ publications: Publication[] }>(`/v1/publications${qs ? `?${qs}` : ""}`);
+  },
+
+  // writes
   presignUpload: (filename: string, contentType: string) =>
     call<{ uploadKey: string; url: string }>("/v1/uploads", {
       method: "POST",
@@ -76,11 +148,14 @@ export const api = {
     call<{ editVersion: number }>(`/v1/clips/${clipId}/edl`, { method: "PATCH", body: JSON.stringify(body) }),
   generateMetadata: (clipId: string) =>
     call<Record<string, unknown>>(`/v1/clips/${clipId}/metadata`, { method: "POST" }),
+  generateRawMetadata: (body: { filename: string; transcript?: string }) =>
+    call<Record<string, unknown>>("/v1/metadata/generate", { method: "POST", body: JSON.stringify(body) }),
   publish: (clipId: string, body: Record<string, unknown>) =>
     call<{ publication: { id: string; status: string }; note?: string }>(`/v1/clips/${clipId}/publish`, {
       method: "POST",
       body: JSON.stringify(body),
     }),
+
   premiereXmlUrl: (clipId: string) => `${BASE}/v1/clips/${clipId}/exports/premiere-xml`,
   apiKey: KEY,
 };
