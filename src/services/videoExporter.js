@@ -60,6 +60,15 @@ export function exportVideo({ videoUrl, spec, onProgress }) {
     const videoH = video.videoHeight || 1280;
     const duration = video.duration || 0;
 
+    // Optional clip trim: spec.clip = { start, end } records only that sub-range.
+    const clip = spec && spec.clip;
+    const clipStart = Math.max(0, Number(clip && clip.start) || 0);
+    const clipEnd = clip && Number(clip.end) > clipStart ? Math.min(duration || Infinity, Number(clip.end)) : duration;
+    const effDuration = Math.max(0.1, (clipEnd || duration) - clipStart);
+    // Whether we must stop recording BEFORE the natural end of the source.
+    const endBounded = Number.isFinite(clipEnd) && clipEnd > 0 && clipEnd < duration - 0.05;
+    let finished = false;
+
     const canvas = document.createElement('canvas');
     canvas.width = videoW;
     canvas.height = videoH;
@@ -99,7 +108,17 @@ export function exportVideo({ videoUrl, spec, onProgress }) {
     const drawFrame = () => {
       ctx.drawImage(video, 0, 0, videoW, videoH);
       drawOverlays(ctx, spec, video.currentTime, videoW, videoH);
-      if (Number.isFinite(duration) && duration > 0) onProgress?.(Math.min(1, video.currentTime / duration));
+      onProgress?.(Math.min(1, (video.currentTime - clipStart) / effDuration));
+    };
+
+    // When trimming to a clip, stop recording once we reach the clip's end
+    // (the source video keeps playing past it, but we don't record it).
+    const maybeStopAtClipEnd = () => {
+      if (endBounded && !finished && video.currentTime >= clipEnd) {
+        finished = true;
+        onProgress?.(1);
+        try { if (recorder.state !== 'inactive') recorder.stop(); } catch { /* already stopped */ }
+      }
     };
 
     // rAF for smooth frame-paced drawing, plus a timer backstop so frames
@@ -108,6 +127,7 @@ export function exportVideo({ videoUrl, spec, onProgress }) {
     const loop = () => {
       if (aborted) return;
       drawFrame();
+      maybeStopAtClipEnd();
       rafId = requestAnimationFrame(loop);
     };
 
@@ -137,22 +157,35 @@ export function exportVideo({ videoUrl, spec, onProgress }) {
         onProgress?.(1);
         try { if (recorder.state !== 'inactive') recorder.stop(); } catch { reject(new Error('Recorder stop failed.')); }
       };
-      // nothing should seek the hidden element; if something does, bail out
-      // rather than record a glitched file
+      // Once recording, nothing should seek the hidden element; if something
+      // does, bail rather than record a glitched file. (The initial seek to
+      // clipStart below happens BEFORE recording, so it's allowed.)
       video.onseeking = () => {
-        if (!aborted && video.currentTime > 0.01 && recorder.state === 'recording') {
+        if (!aborted && recorder.state === 'recording') {
           reject(new Error('Export interrupted by seek.'));
         }
       };
 
-      video.currentTime = 0;
-      video.play()
-        .then(() => {
-          recorder.start(1000); // timesliced so memory pressure surfaces progressively
-          loop();
-          intervalId = setInterval(() => { if (!aborted && !video.paused) drawFrame(); }, 33);
-        })
-        .catch(() => reject(new Error('Could not start video playback for export.')));
+      const startPlayback = () => {
+        video.play()
+          .then(() => {
+            recorder.start(1000); // timesliced so memory pressure surfaces progressively
+            loop();
+            intervalId = setInterval(() => {
+              if (!aborted && !video.paused) { drawFrame(); maybeStopAtClipEnd(); }
+            }, 33);
+          })
+          .catch(() => reject(new Error('Could not start video playback for export.')));
+      };
+
+      if (clipStart > 0.01) {
+        // Seek to the clip's start, then begin recording from there.
+        video.onseeked = () => { video.onseeked = null; startPlayback(); };
+        video.currentTime = clipStart;
+      } else {
+        video.currentTime = 0;
+        startPlayback();
+      }
     }).finally(cleanup);
 
     return { blob: result, mimeType: actualMime, ext: picked.ext };

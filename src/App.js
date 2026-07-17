@@ -6,6 +6,7 @@ import PostsView from './components/PostsView';
 import Analytics from './components/Analytics';
 import AccountsView from './components/AccountsView';
 import CaptionsView from './components/CaptionsView';
+import ClipsView from './components/ClipsView';
 import DropZone from './components/DropZone';
 import VideoCard from './components/VideoCard';
 import QueueProgress from './components/QueueProgress';
@@ -41,6 +42,7 @@ function saveJSON(key, items) {
 const VIEW_META = {
   dashboard: { title: 'Dashboard', subtitle: 'Your content at a glance' },
   composer: { title: 'Composer', subtitle: 'Generate and publish content' },
+  clips: { title: 'Clips', subtitle: 'Turn one long video into viral clips' },
   captions: { title: 'Captions', subtitle: 'Auto burned-in subtitles' },
   calendar: { title: 'Content Calendar', subtitle: 'Scheduled & published posts' },
   posts: { title: 'Posts', subtitle: 'Everything scheduled & published' },
@@ -235,6 +237,9 @@ export default function App() {
     }
     if (view === 'posts') {
       return <PostsView posts={posts} onNavigate={setView} onRefresh={syncPosts} syncState={syncState} isMobile={isMobile} />;
+    }
+    if (view === 'clips') {
+      return <ClipsView onPublished={handlePublished} onSaveToLibrary={addToLibrary} />;
     }
     if (view === 'captions') {
       return <CaptionsView />;

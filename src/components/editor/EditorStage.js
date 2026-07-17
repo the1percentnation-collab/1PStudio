@@ -46,6 +46,11 @@ export default function EditorStage({
     const v = e.currentTarget;
     setVideoDims({ w: v.videoWidth || 720, h: v.videoHeight || 1280 });
     onDurationKnown?.(v.duration);
+    // For a clip, start playback at the clip's in-point.
+    const clip = specRef.current?.clip;
+    if (clip && Number(clip.start) > 0) {
+      try { v.currentTime = Number(clip.start); } catch { /* ignore */ }
+    }
   }, [onDurationKnown]);
 
   // always-running draw loop: overlays + selection rect follow the video clock
@@ -58,6 +63,12 @@ export default function EditorStage({
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         drawOverlays(ctx, specRef.current, video.currentTime, canvas.width, canvas.height);
+
+        // Keep clip previews looping within [clip.start, clip.end].
+        const clip = specRef.current?.clip;
+        if (clip && !video.paused && video.currentTime >= Number(clip.end) - 0.03) {
+          try { video.currentTime = Number(clip.start) || 0; } catch { /* ignore */ }
+        }
 
         if (selectedRef.current) {
           const b = getTextBounds(ctx, specRef.current, canvas.width, canvas.height)
