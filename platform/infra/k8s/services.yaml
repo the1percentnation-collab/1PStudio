@@ -1,0 +1,91 @@
+# CPU tiers: api (stateless), orchestrator (Temporal worker), render (high-mem).
+# (Reference-grade: not yet cluster-tested.)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: onepct
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: api } }
+  template:
+    metadata: { labels: { app: api } }
+    spec:
+      containers:
+        - name: api
+          image: onepct/api:latest
+          ports: [{ containerPort: 3001 }]
+          envFrom: [{ configMapRef: { name: platform-config } }]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: platform-secrets, key: DATABASE_URL } }
+            - name: JWT_SECRET
+              valueFrom: { secretKeyRef: { name: platform-secrets, key: JWT_SECRET } }
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 3001 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: onepct
+spec:
+  selector: { app: api }
+  ports: [{ port: 3001, targetPort: 3001 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orchestrator
+  namespace: onepct
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: orchestrator } }
+  template:
+    metadata: { labels: { app: orchestrator } }
+    spec:
+      containers:
+        - name: orchestrator
+          image: onepct/orchestrator:latest
+          envFrom: [{ configMapRef: { name: platform-config } }]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: platform-secrets, key: DATABASE_URL } }
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: render
+  namespace: onepct
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: render } }
+  template:
+    metadata: { labels: { app: render } }
+    spec:
+      containers:
+        - name: render
+          image: onepct/render:latest
+          ports: [{ containerPort: 8080 }]
+          envFrom: [{ configMapRef: { name: platform-config } }]
+          env:
+            - { name: RENDER_CONCURRENCY, value: "2" }
+            # Flip on for NVENC nodes: USE_NVENC=1 + schedule onto the gpu pool.
+          resources:
+            requests: { cpu: "2", memory: 4Gi }
+            limits: { cpu: "4", memory: 8Gi }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: render
+  namespace: onepct
+spec:
+  selector: { app: render }
+  ports: [{ port: 8080, targetPort: 8080 }]

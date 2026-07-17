@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: onepct
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-config
+  namespace: onepct
+data:
+  TEMPORAL_ADDRESS: temporal:7233
+  TEMPORAL_TASK_QUEUE: video-pipeline
+  ML_URL: http://ml:8000
+  RENDER_URL: http://render:8080
+  S3_ENDPOINT: http://minio:9000
