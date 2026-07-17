@@ -1,0 +1,422 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Accounts & workspaces ----------
+
+model User {
+  id          String       @id @default(cuid())
+  email       String       @unique
+  name        String?
+  createdAt   DateTime     @default(now())
+  memberships Membership[]
+  apiKeys     ApiKey[]
+  otps        OtpCode[]
+}
+
+model OtpCode {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  code      String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model Membership {
+  id          String    @id @default(cuid())
+  userId      String
+  workspaceId String
+  role        Role      @default(MEMBER)
+  user        User      @relation(fields: [userId], references: [id])
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+
+  @@unique([userId, workspaceId])
+}
+
+model Workspace {
+  id             String          @id @default(cuid())
+  name           String
+  planId         String          @default("FREE") // FREE | STARTER | PRO | BUSINESS (defs in @onepct/shared)
+  settings       Json            @default("{}")
+  createdAt      DateTime        @default(now())
+  memberships    Membership[]
+  projects       Project[]
+  brandTemplates BrandTemplate[]
+  fonts          Font[]
+  vocabTerms     VocabTerm[]
+  assets         Asset[]
+  folders        Folder[]
+  socialAccounts SocialAccount[]
+  creditLedger   CreditLedger[]
+  subscription   Subscription?
+  apiKeys        ApiKey[]
+  webhooks       Webhook[]
+}
+
+// ---------- Projects & media ----------
+
+enum ProjectStatus {
+  QUEUED
+  PROCESSING
+  READY
+  FAILED
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  workspaceId String
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id])
+  folderId    String?
+  folder      Folder?       @relation(fields: [folderId], references: [id])
+  title       String
+  status      ProjectStatus @default(QUEUED)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  sourceVideo SourceVideo?
+  clips       Clip[]
+  jobs        Job[]
+}
+
+enum SourceStatus {
+  PENDING
+  INGESTING
+  READY
+  FAILED
+}
+
+model SourceVideo {
+  id            String            @id @default(cuid())
+  projectId     String            @unique
+  project       Project           @relation(fields: [projectId], references: [id])
+  originUrl     String?
+  uploadKey     String?
+  contentHash   String?
+  durationSec   Float?
+  width         Int?
+  height        Int?
+  fps           Float?
+  normalizedKey String?
+  thumbKeys     Json? // { hook, mid, end }
+  status        SourceStatus      @default(PENDING)
+  createdAt     DateTime          @default(now())
+  timeline      TimelineMetadata?
+
+  @@index([contentHash])
+}
+
+model TimelineMetadata {
+  id            String      @id @default(cuid())
+  sourceVideoId String      @unique
+  sourceVideo   SourceVideo @relation(fields: [sourceVideoId], references: [id])
+  language      String?
+  transcript    Json? // { language, words[], segments[] }
+  scenes        Json? // [{ startSec, endSec }]
+  faceTracks    Json? // [{ id, boxes: [{t, cx, cy, w, h}] }]
+  audioEnergy   Json? // [{ t, rms }]
+  updatedAt     DateTime    @updatedAt
+}
+
+// ---------- Clips & edits ----------
+
+enum ClipStatus {
+  SELECTED
+  PROCESSING
+  READY
+  FAILED
+}
+
+model Clip {
+  id                 String        @id @default(cuid())
+  projectId          String
+  project            Project       @relation(fields: [projectId], references: [id])
+  startSec           Float
+  endSec             Float
+  title              String
+  hookText           String?
+  viralityScore      Float         @default(0)
+  viralityBreakdown  Json?
+  viralityReason     String?
+  transcriptSlice    Json?
+  status             ClipStatus    @default(SELECTED)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  editDecision       EditDecision?
+  captionSet         CaptionSet?
+  reframePlan        ReframePlan?
+  renders            Render[]
+  publications       Publication[]
+  contentMetadata    Json? // ContentMetadata (ported 1P Studio generator output)
+}
+
+model EditDecision {
+  id        String   @id @default(cuid())
+  clipId    String   @unique
+  clip      Clip     @relation(fields: [clipId], references: [id])
+  version   Int      @default(1)
+  ops       Json // EditOp[]
+  updatedBy String?
+  updatedAt DateTime @updatedAt
+}
+
+enum Resolution {
+  R720
+  R1080
+  R4K
+}
+
+enum RenderStatus {
+  QUEUED
+  RENDERING
+  DONE
+  FAILED
+}
+
+model Render {
+  id          String       @id @default(cuid())
+  clipId      String
+  clip        Clip         @relation(fields: [clipId], references: [id])
+  editVersion Int
+  resolution  Resolution   @default(R1080)
+  status      RenderStatus @default(QUEUED)
+  outputKey   String?
+  thumbKey    String?
+  durationSec Float?
+  error       String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([clipId, editVersion])
+}
+
+model CaptionSet {
+  id       String  @id @default(cuid())
+  clipId   String  @unique
+  clip     Clip    @relation(fields: [clipId], references: [id])
+  language String  @default("en")
+  lines    Json // CaptionLine[]
+  style    Json? // CaptionStyle override
+}
+
+enum ReframeMode {
+  FACE_TRACK
+  CENTER
+  SPLIT
+}
+
+model ReframePlan {
+  id        String      @id @default(cuid())
+  clipId    String      @unique
+  clip      Clip        @relation(fields: [clipId], references: [id])
+  mode      ReframeMode @default(FACE_TRACK)
+  aspect    String      @default("9:16")
+  keyframes Json // CropKeyframe[]
+}
+
+// ---------- Branding ----------
+
+model BrandTemplate {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  workspace        Workspace @relation(fields: [workspaceId], references: [id])
+  name             String
+  captionStyle     Json? // CaptionStyle
+  watermarkAssetId String?
+  fontId           String?
+  colors           Json?
+  isDefault        Boolean   @default(false)
+}
+
+model Font {
+  id          String     @id @default(cuid())
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id])
+  family      String
+  fileKey     String
+}
+
+model VocabTerm {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  term        String
+  soundsLike  String?
+}
+
+enum AssetKind {
+  WATERMARK
+  LOGO
+  BROLL
+  FONT
+  MUSIC
+  OTHER
+}
+
+model Asset {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  kind        AssetKind @default(OTHER)
+  fileKey     String
+  meta        Json?
+  createdAt   DateTime  @default(now())
+}
+
+model Folder {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  name        String
+  parentId    String?
+  parent      Folder?   @relation("FolderTree", fields: [parentId], references: [id])
+  children    Folder[]  @relation("FolderTree")
+  projects    Project[]
+}
+
+// ---------- Publishing (stub seam: OAuth + real posting not wired) ----------
+
+enum Platform {
+  TIKTOK
+  YOUTUBE
+  INSTAGRAM
+  X
+}
+
+enum SocialAccountStatus {
+  STUB
+  CONNECTED
+  REVOKED
+}
+
+model SocialAccount {
+  id           String              @id @default(cuid())
+  workspaceId  String
+  workspace    Workspace           @relation(fields: [workspaceId], references: [id])
+  platform     Platform
+  handle       String
+  oauthBlob    Json?
+  status       SocialAccountStatus @default(STUB)
+  publications Publication[]
+}
+
+enum PublicationStatus {
+  DRAFT
+  SCHEDULED
+  POSTED
+  FAILED
+}
+
+model Publication {
+  id              String            @id @default(cuid())
+  clipId          String
+  clip            Clip              @relation(fields: [clipId], references: [id])
+  socialAccountId String?
+  socialAccount   SocialAccount?    @relation(fields: [socialAccountId], references: [id])
+  platform        Platform
+  title           String?
+  description     String?
+  hashtags        String?
+  scheduledAt     DateTime?
+  status          PublicationStatus @default(DRAFT)
+  createdAt       DateTime          @default(now())
+}
+
+// ---------- Credits & billing ----------
+
+enum LedgerReason {
+  STAGE_CHARGE
+  ADDON_CHARGE
+  GRANT
+  REFUND
+  PLAN_RENEWAL
+}
+
+/// Append-only: no update path is exposed anywhere in the codebase.
+model CreditLedger {
+  id             String       @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id])
+  delta          Int // negative = charge, positive = grant
+  reason         LedgerReason
+  stage          String?
+  jobId          String?
+  idempotencyKey String       @unique
+  createdAt      DateTime     @default(now())
+
+  @@index([workspaceId, createdAt])
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  STUB
+}
+
+model Subscription {
+  id          String             @id @default(cuid())
+  workspaceId String             @unique
+  workspace   Workspace          @relation(fields: [workspaceId], references: [id])
+  planId      String
+  status      SubscriptionStatus @default(STUB)
+  renewsAt    DateTime?
+}
+
+// ---------- API & automation ----------
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  hashedKey   String    @unique
+  prefix      String
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+model Webhook {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  url         String
+  events      String[]
+  secret      String
+  active      Boolean   @default(true)
+}
+
+// ---------- Jobs ----------
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+}
+
+model Job {
+  id          String    @id @default(cuid())
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id])
+  workflowId  String    @unique
+  kind        String    @default("videoPipeline") // videoPipeline | renderClip
+  stage       String? // current PipelineStage
+  stageStatus Json      @default("{}") // JobStageStatus
+  status      JobStatus @default(QUEUED)
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+}
