@@ -9,7 +9,7 @@ export function registerProjectRoutes(app: FastifyInstance): void {
       where: { workspaceId: req.auth.workspaceId },
       orderBy: { createdAt: "desc" },
       take: 50,
-      include: { sourceVideo: true, jobs: { orderBy: { startedAt: "desc" }, take: 1 }, _count: { select: { clips: true } } },
+      include: { sourceVideo: true, jobs: { where: { kind: "videoPipeline" }, orderBy: { startedAt: "desc" }, take: 1 }, _count: { select: { clips: true } } },
     });
     return {
       projects: projects.map((p) => ({
@@ -28,7 +28,7 @@ export function registerProjectRoutes(app: FastifyInstance): void {
     const { id } = req.params as { id: string };
     const project = await db.project.findFirst({
       where: { id, workspaceId: req.auth.workspaceId },
-      include: { sourceVideo: true, jobs: { orderBy: { startedAt: "desc" }, take: 1 } },
+      include: { sourceVideo: true, jobs: { where: { kind: "videoPipeline" }, orderBy: { startedAt: "desc" }, take: 1 } },
     });
     if (!project) return reply.code(404).send({ error: "not found" });
     const job = project.jobs[0];
