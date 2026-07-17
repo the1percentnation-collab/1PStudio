@@ -1,6 +1,14 @@
 import React, { useState } from 'react';
 import { SOCIAL_PLATFORMS, publishToSocial } from '../services/socialService';
 
+// datetime-local inputs are LOCAL time; toISOString() alone is UTC and would
+// skew `min` by the user's timezone offset.
+function minSchedule() {
+  const d = new Date(Date.now() + 5 * 60000);
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
+
 export default function PublishPanel({ videoFile, content, onPublished, filename, thumbnail, mediaType }) {
   const isPhoto = mediaType === 'photo';
   // YouTube is video-only; photos post to Instagram as regular feed posts, not Reels.
@@ -32,18 +40,37 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
       setStatus({ type: 'error', message: 'Pick a date and time to schedule.' });
       return;
     }
+    // The input's `min` is advisory only — typed values bypass it.
+    if (scheduleOn) {
+      const t = new Date(scheduleAt).getTime();
+      if (Number.isNaN(t)) {
+        setStatus({ type: 'error', message: 'Pick a valid date and time.' });
+        return;
+      }
+      if (t < Date.now() + 2 * 60000) {
+        setStatus({ type: 'error', message: 'Schedule time must be at least 2 minutes in the future.' });
+        return;
+      }
+    }
 
     setPosting(true);
     setStatus(null);
     setProgress(0);
     try {
-      await publishToSocial(videoFile, {
+      const result = await publishToSocial(videoFile, {
         post: caption,
         title,
         platforms: selected,
         scheduleDate,
         onProgress: setProgress,
       });
+      // Ayrshare's post id lets us reconcile this record against real
+      // outcomes later (scheduled posts can fail hours after being queued).
+      const ayrshareId =
+        result?.ayrshare?.id ??
+        result?.ayrshare?.postId ??
+        result?.ayrshare?.posts?.[0]?.id ??
+        null;
       const isScheduled = Boolean(scheduleDate);
       setStatus({
         type: 'ok',
@@ -54,6 +81,7 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
       if (onPublished) {
         onPublished({
           id: `post-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          ayrshareId,
           caption,
           title,
           platforms: selected,
@@ -61,6 +89,7 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
           thumbnail: thumbnail || null,
           date: scheduleDate || new Date().toISOString(),
           status: isScheduled ? 'scheduled' : 'published',
+          errors: [],
         });
       }
     } catch (err) {
@@ -203,7 +232,7 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
         <input
           type="datetime-local"
           value={scheduleAt}
-          min={new Date(Date.now() + 5 * 60000).toISOString().slice(0, 16)}
+          min={minSchedule()}
           onChange={(e) => setScheduleAt(e.target.value)}
           style={{
             width: '100%',

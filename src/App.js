@@ -1,7 +1,8 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import CalendarView from './components/CalendarView';
+import PostsView from './components/PostsView';
 import Analytics from './components/Analytics';
 import AccountsView from './components/AccountsView';
 import CaptionsView from './components/CaptionsView';
@@ -10,7 +11,9 @@ import VideoCard from './components/VideoCard';
 import QueueProgress from './components/QueueProgress';
 import LibraryView from './components/LibraryView';
 import { generateTikTokContent } from './services/claudeService';
+import { syncPostHistory } from './services/postSync';
 import VideoEditorModal from './components/editor/VideoEditorModal';
+import TextPostCreator from './components/TextPostCreator';
 
 const LIBRARY_KEY = '1p-studio-library';
 const POSTS_KEY = '1p-studio-posts';
@@ -40,6 +43,7 @@ const VIEW_META = {
   composer: { title: 'Composer', subtitle: 'Generate and publish content' },
   captions: { title: 'Captions', subtitle: 'Auto burned-in subtitles' },
   calendar: { title: 'Content Calendar', subtitle: 'Scheduled & published posts' },
+  posts: { title: 'Posts', subtitle: 'Everything scheduled & published' },
   analytics: { title: 'Analytics', subtitle: 'Performance & content insights' },
   library: { title: 'Library', subtitle: 'Saved generated content' },
   accounts: { title: 'Accounts', subtitle: 'Connect your social platforms' },
@@ -55,7 +59,25 @@ export default function App() {
   const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 768 : false));
 
   useEffect(() => { saveJSON(LIBRARY_KEY, library); }, [library]);
-  useEffect(() => { saveJSON(POSTS_KEY, posts); }, [posts]);
+
+  // Ref mirrors posts so syncPosts stays a stable callback (Refresh can fire
+  // long after mount without capturing a stale posts array).
+  const postsRef = useRef(posts);
+  useEffect(() => {
+    postsRef.current = posts;
+    saveJSON(POSTS_KEY, posts);
+  }, [posts]);
+
+  const [syncState, setSyncState] = useState({ loading: false, configured: null, error: null });
+  const syncPosts = useCallback(async () => {
+    setSyncState((s) => ({ ...s, loading: true }));
+    const { posts: merged, configured, error } = await syncPostHistory(postsRef.current);
+    setPosts(merged);
+    setSyncState({ loading: false, configured, error: error || null });
+  }, []);
+
+  // Reconcile once on load so stale "scheduled" statuses correct themselves.
+  useEffect(() => { syncPosts(); }, [syncPosts]);
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 768);
@@ -183,6 +205,7 @@ export default function App() {
 
   const [editingId, setEditingId] = useState(null);
   const editingResult = results.find((r) => r.id === editingId) || null;
+  const [showTextCreator, setShowTextCreator] = useState(false);
 
   const handleEdit = useCallback((id) => setEditingId(id), []);
 
@@ -210,6 +233,9 @@ export default function App() {
     if (view === 'calendar') {
       return <CalendarView posts={posts} onNavigate={setView} isMobile={isMobile} />;
     }
+    if (view === 'posts') {
+      return <PostsView posts={posts} onNavigate={setView} onRefresh={syncPosts} syncState={syncState} isMobile={isMobile} />;
+    }
     if (view === 'captions') {
       return <CaptionsView />;
     }
@@ -225,6 +251,28 @@ export default function App() {
     // composer
     return (
       <>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <button
+            onClick={() => setShowTextCreator(true)}
+            disabled={processing}
+            style={{
+              background: '#111',
+              border: '1px solid #2A2A2A',
+              borderRadius: 10,
+              padding: '10px 16px',
+              color: '#FFF',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: processing ? 'not-allowed' : 'pointer',
+              opacity: processing ? 0.5 : 1,
+              transition: 'border-color 0.2s',
+            }}
+            onMouseEnter={(e) => { if (!processing) e.currentTarget.style.borderColor = '#E60306'; }}
+            onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#2A2A2A')}
+          >
+            ✍️ Create Text Post
+          </button>
+        </div>
         <DropZone onFilesSelected={handleFilesSelected} processing={processing} />
 
         {isQueueActive && (
@@ -302,6 +350,14 @@ export default function App() {
           result={editingResult}
           onClose={() => setEditingId(null)}
           onSaveSpec={handleSaveSpec}
+        />
+      )}
+
+      {/* full-screen text post creator — rendered card feeds the photo pipeline */}
+      {showTextCreator && (
+        <TextPostCreator
+          onClose={() => setShowTextCreator(false)}
+          onCreate={(file) => handleFilesSelected([file])}
         />
       )}
     </div>

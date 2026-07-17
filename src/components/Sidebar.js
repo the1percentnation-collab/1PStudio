@@ -31,6 +31,16 @@ const ICONS = {
       <line x1="3" y1="10" x2="21" y2="10" />
     </>
   ),
+  posts: (
+    <>
+      <line x1="8" y1="6" x2="21" y2="6" />
+      <line x1="8" y1="12" x2="21" y2="12" />
+      <line x1="8" y1="18" x2="21" y2="18" />
+      <circle cx="3.5" cy="6" r="1" />
+      <circle cx="3.5" cy="12" r="1" />
+      <circle cx="3.5" cy="18" r="1" />
+    </>
+  ),
   analytics: (
     <>
       <line x1="6" y1="20" x2="6" y2="14" />
@@ -75,6 +85,7 @@ const NAV = [
   { id: 'composer', label: 'Composer', icon: 'composer' },
   { id: 'captions', label: 'Captions', icon: 'captions' },
   { id: 'calendar', label: 'Calendar', icon: 'calendar' },
+  { id: 'posts', label: 'Posts', icon: 'posts' },
   { id: 'analytics', label: 'Analytics', icon: 'analytics' },
   { id: 'library', label: 'Library', icon: 'library' },
   { id: 'accounts', label: 'Accounts', icon: 'accounts' },

@@ -40,6 +40,11 @@
         "region": "us-central1"
       },
       {
+        "source": "/api/history",
+        "function": "postHistory",
+        "region": "us-central1"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }
