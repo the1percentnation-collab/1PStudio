@@ -503,6 +503,8 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished,
             filename={filename}
             thumbnail={frames?.hookFrame}
             mediaType={mediaType}
+            overlaySpec={result.overlaySpec}
+            words={result.words}
           />
         )}
 

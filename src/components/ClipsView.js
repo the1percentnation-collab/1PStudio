@@ -78,7 +78,7 @@ function ClipCard({ result, onEdit, onPublished, onSaveToLibrary }) {
         {error && <div style={{ fontSize: 11.5, color: c.danger }}>{error}</div>}
 
         {exported ? (
-          <PublishPanel videoFile={exported.file} content={result.content} onPublished={onPublished} filename={exported.file.name} thumbnail={null} mediaType="video" />
+          <PublishPanel videoFile={exported.file} content={result.content} onPublished={onPublished} filename={exported.file.name} thumbnail={null} mediaType="video" preRendered />
         ) : (
           <div style={{ fontSize: 11, color: c.textFaint, borderTop: `1px solid ${c.border}`, paddingTop: 11 }}>Render the clip to download or publish it.</div>
         )}

@@ -66,7 +66,22 @@ export async function getConnectedAccounts() {
   return data; // { configured, connected: [ids], displayNames: [{platform, displayName}], error? }
 }
 
-export async function publishToSocial(mediaFile, { post, title, platforms, scheduleDate, onProgress }) {
+// Server-side burns the editor's on-screen text + captions (the overlay spec)
+// into the video with ffmpeg and returns a new download URL to post.
+export async function renderOverlays(videoUrl, spec) {
+  const response = await fetch('/api/render', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ videoUrl, spec }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.error || `Render failed (${response.status})`);
+  }
+  return data; // { status, videoUrl, rendered }
+}
+
+export async function publishToSocial(mediaFile, { post, title, platforms, scheduleDate, onProgress, onPhase, spec, burnIn }) {
   if (!mediaFile) {
     throw new Error('No media file is attached to this card — regenerate it from an upload to enable posting.');
   }
@@ -78,8 +93,23 @@ export async function publishToSocial(mediaFile, { post, title, platforms, sched
   }
 
   const mediaType = mediaFile.type?.startsWith('image/') ? 'photo' : 'video';
-  const mediaUrl = await uploadVideo(mediaFile, onProgress);
+  let mediaUrl = await uploadVideo(mediaFile, onProgress);
 
+  // Burn the on-screen text + captions into the video before posting so the
+  // published clip carries them. If the render fails (e.g. very long video hits
+  // the hosting timeout), fall back to posting the original and warn.
+  let renderWarning = null;
+  if (burnIn && spec && mediaType === 'video') {
+    onPhase?.('rendering');
+    try {
+      const rendered = await renderOverlays(mediaUrl, spec);
+      if (rendered?.videoUrl) mediaUrl = rendered.videoUrl;
+    } catch (err) {
+      renderWarning = err?.message || 'Could not render captions.';
+    }
+  }
+
+  onPhase?.('publishing');
   const response = await fetch('/api/publish', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -90,5 +120,5 @@ export async function publishToSocial(mediaFile, { post, title, platforms, sched
   if (!response.ok) {
     throw new Error(data?.error || `Publish failed (${response.status})`);
   }
-  return data;
+  return { ...data, renderWarning };
 }
