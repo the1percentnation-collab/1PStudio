@@ -26,9 +26,15 @@ function extractFrameAt(video, pct) {
     const onSeeked = () => {
       video.removeEventListener('seeked', onSeeked);
       try {
+        // Cap the long edge (like photos) — a 4K phone video otherwise yields
+        // multi-MB base64 frames, and the resulting huge POST body is exactly
+        // what makes iOS Safari drop the analyze request with "Load failed".
+        const w = video.videoWidth || 640;
+        const h = video.videoHeight || 360;
+        const scale = Math.min(1, MAX_IMAGE_DIM / Math.max(w, h));
         const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth || 640;
-        canvas.height = video.videoHeight || 360;
+        canvas.width = Math.round(w * scale);
+        canvas.height = Math.round(h * scale);
         canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
         resolve(canvas.toDataURL('image/jpeg', 0.75).split(',')[1]);
       } catch {
@@ -149,11 +155,33 @@ export async function generateTikTokContent(file, onProgress, transcript = '') {
 
   onProgress('Analyzing with Claude...');
 
-  const response = await fetch('/api/analyze', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ frames, transcript: finalTranscript, filename: file.name, mediaType }),
-  });
+  // Network-level failures (iOS Safari's bare "Load failed") get retried —
+  // a single dropped connection shouldn't kill the whole generation.
+  const body = JSON.stringify({ frames, transcript: finalTranscript, filename: file.name, mediaType });
+  let response = null;
+  let netErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      onProgress(`Connection dropped — retrying (${attempt + 1}/3)…`);
+      await new Promise((r) => setTimeout(r, 1500 * attempt));
+    }
+    try {
+      response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+      netErr = null;
+      break;
+    } catch (err) {
+      netErr = err;
+    }
+  }
+  if (!response) {
+    throw new Error(
+      `Network dropped while analyzing (${netErr?.message || 'load failed'}). Check your connection and tap Regenerate.`
+    );
+  }
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
