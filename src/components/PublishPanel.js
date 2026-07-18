@@ -93,7 +93,20 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
         });
       }
     } catch (err) {
-      setStatus({ type: 'error', message: err.message });
+      // A video publish can take longer than Firebase Hosting's 60s response
+      // cap, so the app sees a 502/timeout even though Zernio went on to post
+      // it. Treat those as "pending" (check Posts) instead of a hard failure;
+      // real validation errors (4xx) still surface as errors.
+      const m = err?.message || 'Publish failed.';
+      const likelyTimedOut = /\b(502|503|504)\b/.test(m) || /reach|timeout|timed out|network|failed to fetch/i.test(m);
+      if (likelyTimedOut) {
+        setStatus({
+          type: 'pending',
+          message: 'Sent to Zernio, but confirmation timed out — large videos can take a minute to finish publishing. It’s likely live; open the Posts tab in a minute to confirm.',
+        });
+      } else {
+        setStatus({ type: 'error', message: m });
+      }
     } finally {
       setPosting(false);
     }
@@ -279,12 +292,12 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
           style={{
             fontSize: 12,
             lineHeight: 1.5,
-            color: status.type === 'ok' ? '#00C48C' : '#FF4444',
+            color: status.type === 'ok' ? '#00C48C' : status.type === 'pending' ? '#FFC107' : '#FF4444',
             marginBottom: 10,
             wordBreak: 'break-word',
           }}
         >
-          {status.type === 'ok' ? '✓ ' : '✕ '}
+          {status.type === 'ok' ? '✓ ' : status.type === 'pending' ? '⏳ ' : '✕ '}
           {status.message}
         </div>
       )}
