@@ -83,7 +83,7 @@ function TitleRow({ title, index }) {
 
 function LibraryCard({ item, onDelete, onEdit, loading }) {
   const [expanded, setExpanded] = useState(false);
-  const { filename, frames, content, transcript, error, dateAdded, mediaType } = item;
+  const { filename, frames, content, transcript, error, dateAdded, mediaType, hasVideo } = item;
   const isPhoto = mediaType === 'photo';
   const pillarColor = content ? (PILLAR_COLORS[content.content_pillar] || '#888') : '#888';
 
@@ -148,10 +148,11 @@ function LibraryCard({ item, onDelete, onEdit, loading }) {
           <button
             onClick={(e) => { e.stopPropagation(); onEdit(item.id); }}
             disabled={loading}
+            title={hasVideo ? 'Edit this video' : 'Re-select this video from your device to edit it'}
             style={{
-              background: loading ? 'transparent' : '#E63329',
+              background: loading ? 'transparent' : hasVideo ? '#E63329' : 'transparent',
               border: `1px solid ${loading ? '#2A2A2A' : '#E63329'}`,
-              color: loading ? '#777' : '#FFF',
+              color: loading ? '#777' : hasVideo ? '#FFF' : '#E63329',
               fontSize: 11,
               fontWeight: 700,
               padding: '6px 12px',
@@ -161,7 +162,7 @@ function LibraryCard({ item, onDelete, onEdit, loading }) {
               whiteSpace: 'nowrap',
             }}
           >
-            {loading ? '…' : '✎ Edit'}
+            {loading ? '…' : hasVideo ? '✎ Edit' : '✎ Re-link'}
           </button>
         )}
 
