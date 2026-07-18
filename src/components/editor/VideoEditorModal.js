@@ -246,7 +246,7 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec }) {
             {formatTime(currentTime)} / {formatTime(duration)}
           </span>
         </div>
-        <div style={{ flex: isMobile ? '1 1 100%' : '0 0 auto', display: 'flex' }}>
+        <div style={{ flex: isMobile ? '1 1 100%' : '0 0 auto', display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 12 }}>
           <ExportPanel
             videoUrl={result.videoUrl}
             spec={spec}
@@ -255,7 +255,30 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec }) {
             exportState={exportState}
             setExportState={setExportState}
             compact={isMobile}
+            secondary
           />
+          <button
+            onClick={handleClose}
+            disabled={isRendering}
+            style={{
+              background: '#E63329',
+              color: '#FFF',
+              fontSize: 14,
+              fontWeight: 700,
+              padding: '11px 22px',
+              borderRadius: 8,
+              border: 'none',
+              cursor: isRendering ? 'not-allowed' : 'pointer',
+              opacity: isRendering ? 0.5 : 1,
+              whiteSpace: 'nowrap',
+              flex: isMobile ? 1 : '0 0 auto',
+              transition: 'opacity 0.2s',
+            }}
+            onMouseEnter={(e) => { if (!isRendering) e.currentTarget.style.opacity = '0.85'; }}
+            onMouseLeave={(e) => { if (!isRendering) e.currentTarget.style.opacity = '1'; }}
+          >
+            Next →
+          </button>
         </div>
       </div>
     </div>
