@@ -11,9 +11,18 @@
 
 import { initializeApp } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
-import { execSync, spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import fs from "node:fs";
+
+// The GitHub runner has no system ffmpeg — use the same bundled binaries the
+// Cloud Functions use (installed by `npm ci` in functions/).
+const require = createRequire(import.meta.url);
+let FFMPEG = "ffmpeg";
+let FFPROBE = "ffprobe";
+try { FFMPEG = require("@ffmpeg-installer/ffmpeg").path; } catch { /* PATH fallback */ }
+try { FFPROBE = require("@ffprobe-installer/ffprobe").path; } catch { /* PATH fallback */ }
 
 const SITE = process.env.SMOKE_BASE_URL || "https://onepstudio-9a3ef.web.app";
 const BUCKET = process.env.SMOKE_BUCKET || "onepstudio-9a3ef.firebasestorage.app";
@@ -47,11 +56,13 @@ async function main() {
 
   // 3) Full burn-in render pipeline on a generated black test video —
   //    any bright pixels in the output prove the overlay text was burned in.
-  execSync(
-    "ffmpeg -y -v error -f lavfi -i color=black:size=1080x1920:duration=5:rate=30 " +
-      "-f lavfi -i anullsrc=r=48000:cl=mono -shortest -c:v libx264 -preset veryfast " +
-      "-pix_fmt yuv420p -c:a aac smoke-in.mp4"
-  );
+  execFileSync(FFMPEG, [
+    "-y", "-v", "error",
+    "-f", "lavfi", "-i", "color=black:size=1080x1920:duration=5:rate=30",
+    "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono",
+    "-shortest", "-c:v", "libx264", "-preset", "veryfast",
+    "-pix_fmt", "yuv420p", "-c:a", "aac", "smoke-in.mp4",
+  ]);
   const srcToken = randomUUID();
   const srcPath = `smoke/${Date.now()}-in.mp4`;
   await bucket.upload("smoke-in.mp4", {
@@ -129,14 +140,14 @@ async function main() {
   // 4) Verify the output: valid h264 at source dimensions, and bright pixels
   //    (YMAX) on the black source prove the text is really in the frames.
   const probe = JSON.parse(
-    execSync("ffprobe -v quiet -print_format json -show_streams smoke-out.mp4").toString()
+    execFileSync(FFPROBE, ["-v", "quiet", "-print_format", "json", "-show_streams", "smoke-out.mp4"]).toString()
   );
   const v = (probe.streams || []).find((s) => s.codec_type === "video");
   if (!v || v.codec_name !== "h264") fail(`output codec ${v?.codec_name} (expected h264)`);
   if (v.width !== 1080 || v.height !== 1920) fail(`unexpected dimensions ${v?.width}x${v?.height}`);
 
   const stats = spawnSync(
-    "ffmpeg",
+    FFMPEG,
     ["-i", "smoke-out.mp4", "-vf", "select=eq(n\\,60),signalstats,metadata=print", "-f", "null", "-"],
     { encoding: "utf8" }
   );
