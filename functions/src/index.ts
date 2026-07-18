@@ -144,28 +144,44 @@ export const analyzeVideo = onRequest(
 );
 
 // ---------------------------------------------------------------------------
-// Social publishing via Ayrshare
+// Social publishing via Zernio (https://zernio.com)
 //
-// Ayrshare is a single API that fans a post out to every connected social
+// Zernio is a single API that fans a post out to every connected social
 // account (TikTok, Instagram Reels, YouTube Shorts, Facebook, X, LinkedIn).
-// You connect each platform once inside the Ayrshare dashboard; this function
-// only needs the Ayrshare API key (set as the AYRSHARE_API_KEY env var / secret).
+// You connect each platform once inside the Zernio dashboard; these functions
+// only need the Zernio API key (set as the ZERNIO_API_KEY env var / secret).
+//
+// Zernio groups connected accounts under a "profile", and a post targets
+// specific account ids. So publishing = resolve profile -> list its accounts
+// -> match the requested platforms to their account ids -> POST /posts. Pin a
+// profile with ZERNIO_PROFILE_ID; otherwise the first profile on the key wins.
 //
 // Flow: the browser uploads the video DIRECTLY to Firebase Storage (no size
 // cap from this function) and POSTs the resulting download URL + caption +
-// selected platforms here as JSON. We hand that URL to Ayrshare's /post
-// endpoint, which pulls the video and posts it to every platform. No
-// per-platform OAuth or app review is needed on our side.
+// selected platforms here as JSON. We hand that URL to Zernio, which pulls the
+// media and posts it. No per-platform OAuth or app review is needed on our side.
 // ---------------------------------------------------------------------------
 
-// Ayrshare's platform identifiers. Note: X is "twitter" in Ayrshare's API.
-const AYRSHARE_PLATFORMS: Record<string, string> = {
+const ZERNIO_API = "https://zernio.com/api/v1";
+
+// App platform id -> Zernio platform id. Note: X is "twitter" in Zernio's API.
+const TO_ZERNIO: Record<string, string> = {
   tiktok: "tiktok",
   instagram: "instagram",
   youtube: "youtube",
   facebook: "facebook",
   x: "twitter",
   twitter: "twitter",
+  linkedin: "linkedin",
+};
+
+// Zernio platform id -> app platform id.
+const FROM_ZERNIO: Record<string, string> = {
+  tiktok: "tiktok",
+  instagram: "instagram",
+  youtube: "youtube",
+  facebook: "facebook",
+  twitter: "x",
   linkedin: "linkedin",
 };
 
@@ -176,6 +192,107 @@ interface PublishBody {
   platforms?: string[];
   scheduleDate?: string;
   mediaType?: string;
+}
+
+interface ZernioAccount {
+  id: string;
+  platform: string;    // normalized to our app's id
+  displayName: string; // handle / name, without a leading "@"
+  connected: boolean;
+}
+
+// Thin Zernio fetch wrapper: attaches auth + JSON headers, parses the body.
+async function zernioFetch(
+  path: string,
+  apiKey: string,
+  init?: RequestInit,
+): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
+  const r = await fetch(`${ZERNIO_API}${path}`, {
+    ...init,
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+  });
+  const data = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+  return {ok: r.ok, status: r.status, data};
+}
+
+// Pull an array out of a response that may be bare or wrapped in a key.
+function asArray(data: unknown, ...keys: string[]): Record<string, unknown>[] {
+  if (Array.isArray(data)) return data as Record<string, unknown>[];
+  const obj = (data ?? {}) as Record<string, unknown>;
+  for (const k of keys) {
+    if (Array.isArray(obj[k])) return obj[k] as Record<string, unknown>[];
+  }
+  return [];
+}
+
+// Best-effort human-readable error out of Zernio's response envelope.
+function zernioError(data: Record<string, unknown>): string | null {
+  const d = data as {
+    message?: string;
+    error?: string | {message?: string};
+    errors?: (string | {message?: string; platform?: string})[];
+  };
+  if (typeof d.error === "string" && d.error.trim()) return d.error.trim();
+  if (d.error && typeof d.error === "object" && d.error.message) {
+    return d.error.message;
+  }
+  if (typeof d.message === "string" && d.message.trim()) return d.message.trim();
+  if (Array.isArray(d.errors)) {
+    const parts = d.errors
+      .map((e) =>
+        typeof e === "string" ?
+          e :
+          `${e.platform ? e.platform + ": " : ""}${e.message ?? ""}`)
+      .filter((s) => s.trim());
+    if (parts.length) return parts.join("; ");
+  }
+  return null;
+}
+
+// Which Zernio profile to operate on. Pinned via ZERNIO_PROFILE_ID, else the
+// first profile on the account. Returns null if the key has no profiles.
+async function resolveProfileId(apiKey: string): Promise<string | null> {
+  const pinned = process.env.ZERNIO_PROFILE_ID;
+  if (pinned) return pinned;
+  const {ok, data} = await zernioFetch("/profiles", apiKey);
+  if (!ok) return null;
+  const first = asArray(data, "profiles", "data", "items")[0];
+  const id = first?.id ?? first?.profileId ?? first?._id;
+  return id ? String(id) : null;
+}
+
+// List a profile's connected accounts, normalized to our app's platform ids.
+async function listZernioAccounts(
+  apiKey: string,
+  profileId: string,
+): Promise<ZernioAccount[]> {
+  const {ok, data} = await zernioFetch(
+    `/accounts?profileId=${encodeURIComponent(profileId)}`,
+    apiKey,
+  );
+  if (!ok) return [];
+  return asArray(data, "accounts", "data", "items")
+    .map((a): ZernioAccount | null => {
+      const rawId = a.id ?? a.accountId ?? a._id;
+      const rawPlatform = String(a.platform ?? a.provider ?? "").toLowerCase();
+      const platform = FROM_ZERNIO[rawPlatform] ?? rawPlatform;
+      if (!rawId || !platform) return null;
+      const status = String(a.status ?? a.health ?? "").toLowerCase();
+      // A status field must read healthy; if absent, presence implies linked.
+      const connected = status ?
+        ["connected", "active", "healthy", "ok", "valid", "ready"]
+          .includes(status) :
+        true;
+      const displayName = String(
+        a.username ?? a.handle ?? a.displayName ?? a.name ?? "",
+      ).replace(/^@/, "");
+      return {id: String(rawId), platform, displayName, connected};
+    })
+    .filter((a): a is ZernioAccount => a !== null);
 }
 
 export const publishPost = onRequest(
@@ -190,25 +307,24 @@ export const publishPost = onRequest(
       return;
     }
 
-    const apiKey = process.env.AYRSHARE_API_KEY;
+    const apiKey = process.env.ZERNIO_API_KEY;
     if (!apiKey) {
-      res.status(500).json({ error: "AYRSHARE_API_KEY is not configured on the server." });
+      res.status(500).json({ error: "ZERNIO_API_KEY is not configured on the server." });
       return;
     }
 
     const { mediaUrl, post, title: rawTitle, platforms: rawPlatforms, scheduleDate, mediaType } = (req.body ?? {}) as PublishBody;
     const isPhoto = mediaType === "photo";
 
-    const requested = (rawPlatforms ?? []).map((p) => p.toLowerCase());
-    const platforms = Array.from(
-      new Set(requested.map((p) => AYRSHARE_PLATFORMS[p]).filter(Boolean))
-    );
+    const requested = Array.from(new Set(
+      (rawPlatforms ?? []).map((p) => p.toLowerCase()).filter((p) => TO_ZERNIO[p])
+    ));
 
-    if (platforms.length === 0) {
+    if (requested.length === 0) {
       res.status(400).json({ error: "Select at least one supported platform to post to." });
       return;
     }
-    if (isPhoto && platforms.includes("youtube")) {
+    if (isPhoto && requested.includes("youtube")) {
       res.status(400).json({ error: "YouTube only supports video — deselect YouTube to post this photo." });
       return;
     }
@@ -223,79 +339,80 @@ export const publishPost = onRequest(
       return;
     }
 
-    // Build the Ayrshare request, including platform-specific options.
-    const title = (rawTitle ?? postText).slice(0, 99);
-    const body: Record<string, unknown> = {
-      post: postText,
-      platforms,
-      mediaUrls: [mediaUrl],
-      isVideo: !isPhoto,
-    };
-
-    if (platforms.includes("youtube")) {
-      body.youTubeOptions = { title, visibility: "public" };
-    }
-    if (platforms.includes("instagram") && !isPhoto) {
-      // Video posts to Instagram publish as Reels; photos post as regular feed posts.
-      body.instagramOptions = { reels: true };
-    }
-
-    // Optional scheduling — Ayrshare accepts an ISO 8601 UTC date in the future.
-    if (scheduleDate && !Number.isNaN(Date.parse(scheduleDate))) {
-      body.scheduleDate = new Date(scheduleDate).toISOString();
-    }
-
-    // Fan the post out.
     try {
-      const ayrRes = await fetch("https://api.ayrshare.com/api/post", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(body),
-      });
-
-      const result = await ayrRes.json().catch(() => ({}));
-      if (!ayrRes.ok) {
-        // Surface Ayrshare's real reason — it may be a top-level message, a
-        // per-platform errors array, or a bare status. Don't hide it behind 403.
-        const r = result as {
-          message?: string;
-          errors?: { message?: string; platform?: string }[];
-          posts?: { status?: string; errors?: { message?: string }[]; platform?: string }[];
-        };
-        const detail =
-          r.message ||
-          r.errors?.map((e) => `${e.platform ? e.platform + ": " : ""}${e.message}`).join("; ") ||
-          r.posts?.flatMap((p) => (p.errors ?? []).map((e) => `${p.platform ? p.platform + ": " : ""}${e.message}`)).join("; ") ||
-          `Ayrshare error ${ayrRes.status}`;
-        res.status(ayrRes.status).json({ error: detail, details: result });
+      // Resolve the profile, then map each requested platform to its account.
+      const profileId = await resolveProfileId(apiKey);
+      if (!profileId) {
+        res.status(400).json({ error: "No Zernio profile is set up for this API key. Create one and connect accounts in the Zernio dashboard." });
         return;
       }
 
-      res.json({ status: "ok", mediaUrl, ayrshare: result });
+      const accounts = await listZernioAccounts(apiKey, profileId);
+      const targets = requested
+        .map((p) => accounts.find((a) => a.platform === p && a.connected))
+        .filter((a): a is ZernioAccount => Boolean(a));
+      const skipped = requested.filter((p) => !targets.some((t) => t.platform === p));
+
+      if (targets.length === 0) {
+        res.status(400).json({
+          error: `None of the selected platforms are connected in Zernio${skipped.length ? ` (${skipped.join(", ")})` : ""}. Connect them in the Zernio dashboard, then try again.`,
+        });
+        return;
+      }
+
+      // Build the Zernio request, including platform-specific options.
+      const title = (rawTitle ?? postText).slice(0, 99);
+      const body: Record<string, unknown> = {
+        content: postText,
+        platforms: targets.map((t) => {
+          const platform = TO_ZERNIO[t.platform] ?? t.platform;
+          const entry: Record<string, unknown> = { platform, accountId: t.id };
+          if (platform === "youtube") {
+            entry.platformSpecificData = { title, privacyStatus: "public" };
+          }
+          if (platform === "instagram" && !isPhoto) {
+            // Instagram video publishes as a Reel; photos post to the feed.
+            entry.platformSpecificData = { mediaType: "REELS" };
+          }
+          return entry;
+        }),
+        mediaItems: [{ type: isPhoto ? "image" : "video", url: mediaUrl }],
+      };
+
+      // Optional scheduling — Zernio accepts an ISO 8601 date in the future.
+      if (scheduleDate && !Number.isNaN(Date.parse(scheduleDate))) {
+        body.scheduledFor = new Date(scheduleDate).toISOString();
+        body.timezone = "UTC";
+      } else {
+        body.publishNow = true;
+      }
+
+      const { ok, status, data } = await zernioFetch("/posts", apiKey, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+
+      if (!ok) {
+        // Surface Zernio's real reason instead of hiding it behind a status.
+        const detail = zernioError(data) || `Zernio error ${status}`;
+        res.status(status).json({ error: detail, details: data });
+        return;
+      }
+
+      // `ayrshare` key kept for client/reconciler back-compat; it carries the
+      // provider's post id (postId) used to match against post history later.
+      res.json({ status: "ok", mediaUrl, skipped, ayrshare: data });
     } catch (e) {
-      res.status(502).json({ error: `Failed to reach Ayrshare: ${e instanceof Error ? e.message : "unknown error"}` });
+      res.status(502).json({ error: `Failed to reach Zernio: ${e instanceof Error ? e.message : "unknown error"}` });
     }
   }
 );
 
 // ---------------------------------------------------------------------------
 // Connected-account status — reads which social accounts are linked in
-// Ayrshare so the app can show live connection state. Accounts are linked in
-// the Ayrshare dashboard; this just reports their status.
+// Zernio so the app can show live connection state. Accounts are linked in
+// the Zernio dashboard; this just reports their status.
 // ---------------------------------------------------------------------------
-
-// Map Ayrshare platform ids back to our app's ids (X is "twitter" in Ayrshare).
-const FROM_AYRSHARE: Record<string, string> = {
-  tiktok: "tiktok",
-  instagram: "instagram",
-  youtube: "youtube",
-  facebook: "facebook",
-  twitter: "x",
-  linkedin: "linkedin",
-};
 
 export const accountsStatus = onRequest(
   {
@@ -304,33 +421,26 @@ export const accountsStatus = onRequest(
     memory: "256MiB",
   },
   async (_req, res) => {
-    const apiKey = process.env.AYRSHARE_API_KEY;
+    const apiKey = process.env.ZERNIO_API_KEY;
     if (!apiKey) {
       res.status(200).json({ configured: false, connected: [], displayNames: [] });
       return;
     }
 
     try {
-      const ayrRes = await fetch("https://api.ayrshare.com/api/user", {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      });
-      const data = (await ayrRes.json().catch(() => ({}))) as {
-        activeSocialAccounts?: string[];
-        displayNames?: { platform?: string; displayName?: string }[];
-      };
-
-      if (!ayrRes.ok) {
-        res.status(200).json({ configured: true, connected: [], displayNames: [], error: `Ayrshare error ${ayrRes.status}` });
+      const profileId = await resolveProfileId(apiKey);
+      if (!profileId) {
+        res.status(200).json({ configured: true, connected: [], displayNames: [], error: "No Zernio profile found for this API key." });
         return;
       }
 
+      const accounts = await listZernioAccounts(apiKey, profileId);
       const connected = Array.from(
-        new Set((data.activeSocialAccounts ?? []).map((p) => FROM_AYRSHARE[p] ?? p))
+        new Set(accounts.filter((a) => a.connected).map((a) => a.platform))
       );
-      const displayNames = (data.displayNames ?? []).map((d) => ({
-        platform: FROM_AYRSHARE[d.platform ?? ""] ?? d.platform,
-        displayName: d.displayName,
-      }));
+      const displayNames = accounts
+        .filter((a) => a.connected && a.displayName)
+        .map((a) => ({ platform: a.platform, displayName: a.displayName }));
 
       res.json({ configured: true, connected, displayNames });
     } catch (e) {
@@ -340,11 +450,11 @@ export const accountsStatus = onRequest(
 );
 
 // ---------------------------------------------------------------------------
-// Post history — proxies Ayrshare's /api/history so the app can show REAL
-// post outcomes (published / still scheduled / failed at fire time) instead
-// of the optimistic local record written when a post was queued. Fields in
-// Ayrshare's response aren't contractually stable, so everything is
-// normalized defensively here and the client only sees one clean shape.
+// Post history — proxies Zernio's GET /posts so the app can show REAL post
+// outcomes (published / still scheduled / failed at fire time) instead of the
+// optimistic local record written when a post was queued. Fields in Zernio's
+// response aren't contractually stable, so everything is normalized defensively
+// here and the client only sees one clean shape.
 // ---------------------------------------------------------------------------
 
 type NormStatus = "published" | "scheduled" | "failed";
@@ -352,8 +462,8 @@ type NormStatus = "published" | "scheduled" | "failed";
 function normStatus(raw: unknown, dateIso: string | null): NormStatus {
   const s = String(raw ?? "").toLowerCase();
   if (["error", "failed", "failure"].includes(s)) return "failed";
-  if (s.startsWith("awaiting") || ["scheduled", "pending", "processing"].includes(s)) return "scheduled";
-  if (["success", "posted", "sent", "published"].includes(s)) return "published";
+  if (s.startsWith("awaiting") || ["scheduled", "pending", "processing", "queued", "draft", "publishing"].includes(s)) return "scheduled";
+  if (["success", "posted", "sent", "published", "completed"].includes(s)) return "published";
   // Unknown status: a future date means it hasn't fired yet.
   return dateIso && Date.parse(dateIso) > Date.now() ? "scheduled" : "published";
 }
@@ -396,43 +506,57 @@ export const postHistory = onRequest(
     memory: "256MiB",
   },
   async (_req, res) => {
-    const apiKey = process.env.AYRSHARE_API_KEY;
+    const apiKey = process.env.ZERNIO_API_KEY;
     if (!apiKey) {
       res.status(200).json({ configured: false, posts: [] });
       return;
     }
 
     try {
-      const ayrRes = await fetch("https://api.ayrshare.com/api/history", {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      });
-      const data = (await ayrRes.json().catch(() => ({}))) as Record<string, unknown>;
+      const profileId = await resolveProfileId(apiKey);
+      const path = profileId ? `/posts?profileId=${encodeURIComponent(profileId)}` : "/posts";
+      const { ok, status, data } = await zernioFetch(path, apiKey);
 
-      if (!ayrRes.ok) {
-        res.status(200).json({ configured: true, posts: [], error: `Ayrshare error ${ayrRes.status}` });
+      if (!ok) {
+        res.status(200).json({ configured: true, posts: [], error: `Zernio error ${status}` });
         return;
       }
 
       // The history envelope may be a bare array or wrapped in a key.
-      const items: Record<string, unknown>[] = Array.isArray(data)
-        ? data
-        : ((data.history ?? data.posts ?? data.items ?? []) as Record<string, unknown>[]);
+      const items = asArray(data, "posts", "data", "items", "history");
 
-      const posts = (Array.isArray(items) ? items : [])
+      const posts = items
         .map((item) => {
           const rawId = item.id ?? item.postId ?? item._id;
           if (!rawId) return null;
           const date =
-            toIso(item.scheduleDate) ?? toIso(item.created) ?? toIso(item.createdUTC) ?? toIso(item.publishDate);
+            toIso(item.scheduledFor) ?? toIso(item.publishedAt) ?? toIso(item.createdAt) ?? toIso(item.created) ?? toIso(item.date);
+          // Platforms may be strings or {platform,...} objects, or live on an
+          // `accounts`/`targets` array of per-account results.
+          const rawPlatforms = Array.isArray(item.platforms) ? item.platforms
+            : Array.isArray(item.accounts) ? item.accounts
+              : Array.isArray(item.targets) ? item.targets
+                : [];
+          const platforms = Array.from(new Set(rawPlatforms
+            .map((p) => {
+              const s = typeof p === "string" ? p : String((p as Record<string, unknown>)?.platform ?? "");
+              return FROM_ZERNIO[s.toLowerCase()] ?? s.toLowerCase();
+            })
+            .filter(Boolean)));
+          // Media may be strings or {url,...} objects under a few keys.
+          const rawMedia = Array.isArray(item.mediaItems) ? item.mediaItems
+            : Array.isArray(item.mediaUrls) ? item.mediaUrls
+              : Array.isArray(item.media) ? item.media
+                : [];
+          const mediaUrls = rawMedia
+            .map((m) => (typeof m === "string" ? m : String((m as Record<string, unknown>)?.url ?? "")))
+            .filter((u): u is string => typeof u === "string" && u.length > 0);
           return {
             id: String(rawId),
             status: normStatus(item.status, date),
-            caption: String(item.post ?? item.caption ?? ""),
-            platforms: (Array.isArray(item.platforms) ? item.platforms : [])
-              .map((p) => FROM_AYRSHARE[String(p).toLowerCase()] ?? String(p)),
-            mediaUrls: (Array.isArray(item.mediaUrls) ? item.mediaUrls : []).filter(
-              (u): u is string => typeof u === "string"
-            ),
+            caption: String(item.content ?? item.post ?? item.caption ?? item.message ?? ""),
+            platforms,
+            mediaUrls,
             date,
             errors: normErrors(item),
           };

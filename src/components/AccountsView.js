@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { SOCIAL_PLATFORMS, getConnectedAccounts } from '../services/socialService';
 
-const AYRSHARE_DASHBOARD = 'https://app.ayrshare.com/social-accounts';
+const ZERNIO_DASHBOARD = 'https://zernio.com/dashboard';
 
 export default function AccountsView() {
   const [state, setState] = useState({ loading: true });
@@ -32,10 +32,10 @@ export default function AccountsView() {
           CONNECTED ACCOUNTS
         </div>
         <div style={{ fontSize: 13, color: '#999', marginTop: 6, lineHeight: 1.5 }}>
-          Link your social accounts once in the Ayrshare dashboard. After that, 1P Studio posts to all of
+          Link your social accounts once in the Zernio dashboard. After that, 1P Studio posts to all of
           them automatically — no per-platform login needed here.
         </div>
-        <a href={AYRSHARE_DASHBOARD} target="_blank" rel="noreferrer">
+        <a href={ZERNIO_DASHBOARD} target="_blank" rel="noreferrer">
           <button style={{
             marginTop: 14,
             background: '#E63329',
@@ -53,7 +53,7 @@ export default function AccountsView() {
       {/* CONFIG WARNING */}
       {state.loading ? null : state.configured === false ? (
         <div style={{ background: 'rgba(255,193,7,0.08)', border: '1px solid #3A3015', borderRadius: 12, padding: '14px 16px', fontSize: 13, color: '#D9B65A', lineHeight: 1.5, marginBottom: 18 }}>
-          Posting isn’t configured on the server yet — add your <strong>AYRSHARE_API_KEY</strong> so connection status and publishing work.
+          Posting isn’t configured on the server yet — add your <strong>ZERNIO_API_KEY</strong> so connection status and publishing work.
         </div>
       ) : state.error ? (
         <div style={{ background: 'rgba(255,68,68,0.07)', border: '1px solid #3A1515', borderRadius: 12, padding: '14px 16px', fontSize: 13, color: '#E08585', lineHeight: 1.5, marginBottom: 18 }}>

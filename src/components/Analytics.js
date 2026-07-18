@@ -404,7 +404,7 @@ export default function Analytics({ library, posts }) {
         lineHeight: 1.5,
       }}>
         <strong style={{ color: '#9BC4E2' }}>Engagement & reach metrics</strong> (impressions, likes, engagement rate) sync
-        here automatically once your social accounts are connected and analytics is enabled via Ayrshare. The charts above
+        here automatically once your social accounts are connected and analytics is enabled via Zernio. The charts above
         reflect your real posting and content data.
       </div>
     </div>
