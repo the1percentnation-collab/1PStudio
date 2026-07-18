@@ -15,6 +15,7 @@ import { generateTikTokContent } from './services/claudeService';
 import { syncPostHistory } from './services/postSync';
 import VideoEditorModal from './components/editor/VideoEditorModal';
 import TextPostCreator from './components/TextPostCreator';
+import { putVideo, getVideo, deleteVideo } from './services/videoStore';
 import { GlowBackground, Eyebrow } from './components/ui';
 import { colors as c, fonts as f } from './theme';
 
@@ -90,6 +91,9 @@ export default function App() {
   }, []);
 
   const addToLibrary = useCallback((entry) => {
+    // Keep the source video (+ word timings) on-device so the item stays
+    // editable later. Photos and failed items have nothing to edit.
+    const canEdit = entry.mediaType !== 'photo' && !!entry._file && !entry.error;
     const libraryEntry = {
       id: entry.id,
       filename: entry.filename,
@@ -97,14 +101,61 @@ export default function App() {
       frames: { hookFrame: entry.frames?.hookFrame ?? null },
       content: entry.content,
       transcript: entry.transcript ? entry.transcript.slice(0, 5000) : '',
+      overlaySpec: entry.overlaySpec ?? null,
+      hasVideo: canEdit,
       error: entry.error,
       dateAdded: Date.now(),
     };
+    if (canEdit) {
+      putVideo(entry.id, entry._file, entry.words || []).catch(() => {
+        // storage unavailable/quota — the item just won't be editable
+        setLibrary((prev) => prev.map((i) => (i.id === entry.id ? { ...i, hasVideo: false } : i)));
+      });
+    }
     setLibrary((prev) => [libraryEntry, ...prev.filter((i) => i.id !== entry.id)]);
   }, []);
 
   const handleLibraryDelete = useCallback((id) => {
+    deleteVideo(id).catch(() => {});
     setLibrary((prev) => prev.filter((i) => i.id !== id));
+  }, []);
+
+  // Editing a saved item: pull its video back out of IndexedDB into a fresh
+  // object URL and open the same editor the Composer uses.
+  const [libEditing, setLibEditing] = useState(null);
+  const [libLoadingId, setLibLoadingId] = useState(null);
+
+  const handleLibraryEdit = useCallback(async (id) => {
+    const entry = library.find((i) => i.id === id);
+    if (!entry) return;
+    setLibLoadingId(id);
+    try {
+      const rec = await getVideo(id);
+      if (!rec?.blob) {
+        window.alert('This video isn’t available for editing on this device — it may have been saved on another device or the browser storage was cleared.');
+        return;
+      }
+      setLibEditing({
+        id: entry.id,
+        filename: entry.filename,
+        mediaType: entry.mediaType,
+        content: entry.content,
+        words: rec.words || [],
+        overlaySpec: entry.overlaySpec ?? null,
+        videoUrl: URL.createObjectURL(rec.blob),
+      });
+    } catch {
+      window.alert('Couldn’t open this video for editing.');
+    } finally {
+      setLibLoadingId(null);
+    }
+  }, [library]);
+
+  const handleCloseLibEditor = useCallback(() => {
+    setLibEditing((cur) => {
+      if (cur?.videoUrl) URL.revokeObjectURL(cur.videoUrl);
+      return null;
+    });
   }, []);
 
   const handlePublished = useCallback((record) => {
@@ -215,6 +266,8 @@ export default function App() {
 
   const handleSaveSpec = useCallback((id, spec) => {
     setResults((prev) => prev.map((r) => (r.id === id ? { ...r, overlaySpec: spec } : r)));
+    // Persist edits back to the saved library item too, so reopening it keeps them.
+    setLibrary((prev) => prev.map((i) => (i.id === id ? { ...i, overlaySpec: spec } : i)));
   }, []);
 
   const handleRemove = useCallback((id) => {
@@ -250,7 +303,7 @@ export default function App() {
       return <Analytics library={library} posts={posts} />;
     }
     if (view === 'library') {
-      return <LibraryView library={library} onDelete={handleLibraryDelete} />;
+      return <LibraryView library={library} onDelete={handleLibraryDelete} onEdit={handleLibraryEdit} loadingId={libLoadingId} />;
     }
     if (view === 'accounts') {
       return <AccountsView />;
@@ -363,6 +416,15 @@ export default function App() {
         <VideoEditorModal
           result={editingResult}
           onClose={() => setEditingId(null)}
+          onSaveSpec={handleSaveSpec}
+        />
+      )}
+
+      {/* editor opened from a saved Library item (video loaded from IndexedDB) */}
+      {libEditing && (
+        <VideoEditorModal
+          result={libEditing}
+          onClose={handleCloseLibEditor}
           onSaveSpec={handleSaveSpec}
         />
       )}
