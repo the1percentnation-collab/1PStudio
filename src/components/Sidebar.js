@@ -180,9 +180,11 @@ export default function Sidebar({ active, onNavigate, counts = {}, isMobile = fa
           left: 0,
           right: 0,
           bottom: 0,
-          background: 'rgba(12,12,12,0.85)',
-          backdropFilter: 'blur(16px)',
-          WebkitBackdropFilter: 'blur(16px)',
+          // Solid (not backdrop-blur): on iOS Safari a `position: fixed`
+          // element with -webkit-backdrop-filter is mis-anchored to the
+          // document instead of the viewport, which drops the bar ~one screen
+          // down and lets the page scroll past it.
+          background: '#0C0C0C',
           borderTop: `1px solid ${c.border}`,
           zIndex: 200,
           paddingBottom: 'env(safe-area-inset-bottom, 0px)',
