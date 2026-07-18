@@ -25,6 +25,25 @@ const POSTS_KEY = '1p-studio-posts';
 let idCounter = 0;
 const uid = () => `v-${++idCounter}-${Date.now()}`;
 
+// Opens a native video file picker and resolves with the chosen File (or null
+// if cancelled). Used to re-attach a source video to a Library item that was
+// saved before videos were persisted on-device.
+function pickVideoFile() {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'video/*';
+    input.style.display = 'none';
+    input.onchange = () => {
+      const file = input.files && input.files[0];
+      input.remove();
+      resolve(file || null);
+    };
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
 function loadJSON(key) {
   try {
     const raw = localStorage.getItem(key);
@@ -125,31 +144,43 @@ export default function App() {
   const [libEditing, setLibEditing] = useState(null);
   const [libLoadingId, setLibLoadingId] = useState(null);
 
+  const openLibEditor = useCallback((entry, blob, words) => {
+    setLibEditing({
+      id: entry.id,
+      filename: entry.filename,
+      mediaType: entry.mediaType,
+      content: entry.content,
+      words: words || [],
+      overlaySpec: entry.overlaySpec ?? null,
+      videoUrl: URL.createObjectURL(blob),
+    });
+  }, []);
+
   const handleLibraryEdit = useCallback(async (id) => {
     const entry = library.find((i) => i.id === id);
     if (!entry) return;
-    setLibLoadingId(id);
-    try {
-      const rec = await getVideo(id);
-      if (!rec?.blob) {
-        window.alert('This video isn’t available for editing on this device — it may have been saved on another device or the browser storage was cleared.');
+
+    // Items saved with this feature keep their video on-device; open directly.
+    if (entry.hasVideo) {
+      setLibLoadingId(id);
+      let rec = null;
+      try { rec = await getVideo(id); } catch { /* fall through to re-pick */ }
+      setLibLoadingId(null);
+      if (rec?.blob) {
+        openLibEditor(entry, rec.blob, rec.words || []);
         return;
       }
-      setLibEditing({
-        id: entry.id,
-        filename: entry.filename,
-        mediaType: entry.mediaType,
-        content: entry.content,
-        words: rec.words || [],
-        overlaySpec: entry.overlaySpec ?? null,
-        videoUrl: URL.createObjectURL(rec.blob),
-      });
-    } catch {
-      window.alert('Couldn’t open this video for editing.');
-    } finally {
-      setLibLoadingId(null);
     }
-  }, [library]);
+
+    // Older items (or ones from another device) have no stored video — let the
+    // user re-select the source file. pickVideoFile() opens the picker
+    // synchronously so the click gesture isn't lost on iOS.
+    const file = await pickVideoFile();
+    if (!file) return;
+    putVideo(id, file, []).catch(() => {});
+    setLibrary((prev) => prev.map((i) => (i.id === id ? { ...i, hasVideo: true } : i)));
+    openLibEditor(entry, file, []);
+  }, [library, openLibEditor]);
 
   const handleCloseLibEditor = useCallback(() => {
     setLibEditing((cur) => {

@@ -83,7 +83,7 @@ function TitleRow({ title, index }) {
 
 function LibraryCard({ item, onDelete, onEdit, loading }) {
   const [expanded, setExpanded] = useState(false);
-  const { filename, frames, content, transcript, error, dateAdded, mediaType, hasVideo } = item;
+  const { filename, frames, content, transcript, error, dateAdded, mediaType } = item;
   const isPhoto = mediaType === 'photo';
   const pillarColor = content ? (PILLAR_COLORS[content.content_pillar] || '#888') : '#888';
 
@@ -142,6 +142,27 @@ function LibraryCard({ item, onDelete, onEdit, loading }) {
           }}>
             {content.hook_score}/10
           </div>
+        )}
+
+        {!isPhoto && onEdit && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onEdit(item.id); }}
+            disabled={loading}
+            style={{
+              background: loading ? 'transparent' : '#E63329',
+              border: `1px solid ${loading ? '#2A2A2A' : '#E63329'}`,
+              color: loading ? '#777' : '#FFF',
+              fontSize: 11,
+              fontWeight: 700,
+              padding: '6px 12px',
+              borderRadius: 8,
+              cursor: loading ? 'default' : 'pointer',
+              flexShrink: 0,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {loading ? '…' : '✎ Edit'}
+          </button>
         )}
 
         <div style={{ color: '#444', fontSize: 12, flexShrink: 0, marginLeft: 4 }}>
@@ -206,46 +227,23 @@ function LibraryCard({ item, onDelete, onEdit, loading }) {
             <div style={{ fontSize: 12, color: '#FF4444', marginBottom: 12 }}>Error: {error}</div>
           ) : null}
 
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            {hasVideo && onEdit && (
-              <button
-                onClick={() => onEdit(item.id)}
-                disabled={loading}
-                style={{
-                  background: loading ? 'transparent' : '#E63329',
-                  border: `1px solid ${loading ? '#2A2A2A' : '#E63329'}`,
-                  color: loading ? '#777' : '#FFF',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  padding: '5px 14px',
-                  borderRadius: 6,
-                  cursor: loading ? 'default' : 'pointer',
-                  transition: 'opacity 0.2s',
-                }}
-                onMouseEnter={(e) => { if (!loading) e.currentTarget.style.opacity = '0.85'; }}
-                onMouseLeave={(e) => { if (!loading) e.currentTarget.style.opacity = '1'; }}
-              >
-                {loading ? 'Opening…' : '✎ Edit video'}
-              </button>
-            )}
-            <button
-              onClick={() => onDelete(item.id)}
-              style={{
-                background: 'transparent',
-                border: '1px solid #2A2A2A',
-                color: '#555',
-                fontSize: 11,
-                padding: '4px 12px',
-                borderRadius: 6,
-                cursor: 'pointer',
-                transition: 'color 0.2s, border-color 0.2s',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = '#FF4444'; e.currentTarget.style.borderColor = '#FF4444'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = '#555'; e.currentTarget.style.borderColor = '#2A2A2A'; }}
-            >
-              Remove from library
-            </button>
-          </div>
+          <button
+            onClick={() => onDelete(item.id)}
+            style={{
+              background: 'transparent',
+              border: '1px solid #2A2A2A',
+              color: '#555',
+              fontSize: 11,
+              padding: '4px 12px',
+              borderRadius: 6,
+              cursor: 'pointer',
+              transition: 'color 0.2s, border-color 0.2s',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = '#FF4444'; e.currentTarget.style.borderColor = '#FF4444'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = '#555'; e.currentTarget.style.borderColor = '#2A2A2A'; }}
+          >
+            Remove from library
+          </button>
         </div>
       )}
     </div>
