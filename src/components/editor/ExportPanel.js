@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useCallback } from 'react';
 import { exportVideo, pickMimeType } from '../../services/videoExporter';
 
-export default function ExportPanel({ videoUrl, spec, filename, duration, exportState, setExportState, compact = false }) {
+export default function ExportPanel({ videoUrl, spec, filename, duration, exportState, setExportState, compact = false, secondary = false }) {
   const jobRef = useRef(null);
 
   // revoke the exported blob URL when the panel unmounts (modal close)
@@ -99,23 +99,34 @@ export default function ExportPanel({ videoUrl, spec, filename, duration, export
       )}
       <button
         onClick={handleExport}
+        title="Render the edited video (captions & overlays baked in) and download it"
         style={{
-          background: '#E63329',
-          color: '#FFF',
+          background: secondary ? 'transparent' : '#E63329',
+          color: secondary ? '#CCC' : '#FFF',
           fontSize: 13,
-          fontWeight: 700,
+          fontWeight: secondary ? 600 : 700,
           padding: '11px 18px',
           borderRadius: 8,
-          border: 'none',
+          border: secondary ? '1px solid #333' : 'none',
           cursor: 'pointer',
-          transition: 'opacity 0.2s',
+          transition: 'opacity 0.2s, border-color 0.2s',
           whiteSpace: 'nowrap',
           flex: compact ? 1 : undefined,
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.opacity = '0.85')}
-        onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}
+        onMouseEnter={(e) => {
+          if (secondary) e.currentTarget.style.borderColor = '#E63329';
+          else e.currentTarget.style.opacity = '0.85';
+        }}
+        onMouseLeave={(e) => {
+          if (secondary) e.currentTarget.style.borderColor = '#333';
+          else e.currentTarget.style.opacity = '1';
+        }}
       >
-        {exportState.status === 'done' ? 'Export again' : compact ? 'Export video' : `Export video${format ? ` (${format.label})` : ''}`}
+        {exportState.status === 'done'
+          ? 'Export again'
+          : compact || secondary
+            ? 'Export video'
+            : `Export video${format ? ` (${format.label})` : ''}`}
       </button>
     </div>
   );
