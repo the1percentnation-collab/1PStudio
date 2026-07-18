@@ -26,6 +26,13 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [exportState, setExportState] = useState({ status: 'idle', progress: 0, url: null, ext: null, error: null });
+  const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 768 : false));
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   const specRef = useRef(spec);
   specRef.current = spec;
@@ -141,9 +148,15 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec }) {
         </button>
       </div>
 
-      {/* STAGE + CONTROLS */}
-      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <div style={{ flex: 1, display: 'flex', padding: 16, minWidth: 0 }}>
+      {/* STAGE + CONTROLS — side by side on desktop, stacked (video on top) on mobile */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: isMobile ? 'column' : 'row', minHeight: 0, overflowY: isMobile ? 'auto' : 'hidden' }}>
+        <div style={{
+          display: 'flex',
+          padding: isMobile ? '10px 10px 4px' : 16,
+          minWidth: 0,
+          flex: isMobile ? '0 0 auto' : 1,
+          height: isMobile ? '48vh' : 'auto',
+        }}>
           <EditorStage
             videoUrl={result.videoUrl}
             spec={spec}
@@ -159,11 +172,12 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec }) {
 
         <div
           style={{
-            width: 320,
+            width: isMobile ? '100%' : 320,
             flexShrink: 0,
-            borderLeft: '1px solid #1A1A1A',
+            borderLeft: isMobile ? 'none' : '1px solid #1A1A1A',
+            borderTop: isMobile ? '1px solid #1A1A1A' : 'none',
             background: '#111',
-            overflowY: 'auto',
+            overflowY: isMobile ? 'visible' : 'auto',
             padding: 18,
           }}
         >
@@ -185,57 +199,64 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec }) {
         </div>
       </div>
 
-      {/* BOTTOM BAR */}
+      {/* BOTTOM BAR — playback + export; wraps to two rows on mobile */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 14,
-          padding: '0 20px',
-          height: 64,
+          gap: isMobile ? 10 : 14,
+          padding: isMobile ? '10px 14px' : '0 20px',
+          minHeight: 64,
           borderTop: '1px solid #1A1A1A',
           flexShrink: 0,
+          flexWrap: isMobile ? 'wrap' : 'nowrap',
         }}
       >
-        <button
-          onClick={togglePlay}
-          disabled={isRendering}
-          aria-label={playing ? 'Pause' : 'Play'}
-          style={{
-            background: '#1A1A1A',
-            border: '1px solid #333',
-            color: '#FFF',
-            fontSize: 14,
-            width: 40,
-            height: 40,
-            borderRadius: '50%',
-            cursor: isRendering ? 'not-allowed' : 'pointer',
-            opacity: isRendering ? 0.5 : 1,
-          }}
-        >
-          {playing ? '❚❚' : '▶'}
-        </button>
-        <input
-          type="range"
-          min={0}
-          max={duration || 0}
-          step={0.05}
-          value={Math.min(currentTime, duration || 0)}
-          onChange={handleScrub}
-          disabled={isRendering}
-          style={{ flex: 1, accentColor: '#E63329' }}
-        />
-        <span style={{ fontSize: 12, color: '#888', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
-          {formatTime(currentTime)} / {formatTime(duration)}
-        </span>
-        <ExportPanel
-          videoUrl={result.videoUrl}
-          spec={spec}
-          filename={result.filename}
-          duration={duration}
-          exportState={exportState}
-          setExportState={setExportState}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 14, flex: '1 1 220px', minWidth: 0 }}>
+          <button
+            onClick={togglePlay}
+            disabled={isRendering}
+            aria-label={playing ? 'Pause' : 'Play'}
+            style={{
+              background: '#1A1A1A',
+              border: '1px solid #333',
+              color: '#FFF',
+              fontSize: 14,
+              width: 40,
+              height: 40,
+              borderRadius: '50%',
+              flexShrink: 0,
+              cursor: isRendering ? 'not-allowed' : 'pointer',
+              opacity: isRendering ? 0.5 : 1,
+            }}
+          >
+            {playing ? '❚❚' : '▶'}
+          </button>
+          <input
+            type="range"
+            min={0}
+            max={duration || 0}
+            step={0.05}
+            value={Math.min(currentTime, duration || 0)}
+            onChange={handleScrub}
+            disabled={isRendering}
+            style={{ flex: 1, minWidth: 0, accentColor: '#E63329' }}
+          />
+          <span style={{ fontSize: 12, color: '#888', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+            {formatTime(currentTime)} / {formatTime(duration)}
+          </span>
+        </div>
+        <div style={{ flex: isMobile ? '1 1 100%' : '0 0 auto', display: 'flex' }}>
+          <ExportPanel
+            videoUrl={result.videoUrl}
+            spec={spec}
+            filename={result.filename}
+            duration={duration}
+            exportState={exportState}
+            setExportState={setExportState}
+            compact={isMobile}
+          />
+        </div>
       </div>
     </div>
   );

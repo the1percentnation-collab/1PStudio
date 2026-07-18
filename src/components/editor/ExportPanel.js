@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useCallback } from 'react';
 import { exportVideo, pickMimeType } from '../../services/videoExporter';
 
-export default function ExportPanel({ videoUrl, spec, filename, duration, exportState, setExportState }) {
+export default function ExportPanel({ videoUrl, spec, filename, duration, exportState, setExportState, compact = false }) {
   const jobRef = useRef(null);
 
   // revoke the exported blob URL when the panel unmounts (modal close)
@@ -73,7 +73,7 @@ export default function ExportPanel({ videoUrl, spec, filename, duration, export
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: compact ? '100%' : undefined }}>
       {exportState.status === 'error' && (
         <span style={{ fontSize: 12, color: '#FF4444', maxWidth: 220 }}>{exportState.error}</span>
       )}
@@ -86,12 +86,15 @@ export default function ExportPanel({ videoUrl, spec, filename, duration, export
             color: '#000',
             fontSize: 13,
             fontWeight: 700,
-            padding: '9px 18px',
+            padding: '11px 18px',
             borderRadius: 8,
             textDecoration: 'none',
+            whiteSpace: 'nowrap',
+            flex: compact ? 1 : undefined,
+            textAlign: 'center',
           }}
         >
-          ⬇ Download video
+          ⬇ Download
         </a>
       )}
       <button
@@ -101,16 +104,18 @@ export default function ExportPanel({ videoUrl, spec, filename, duration, export
           color: '#FFF',
           fontSize: 13,
           fontWeight: 700,
-          padding: '9px 18px',
+          padding: '11px 18px',
           borderRadius: 8,
           border: 'none',
           cursor: 'pointer',
           transition: 'opacity 0.2s',
+          whiteSpace: 'nowrap',
+          flex: compact ? 1 : undefined,
         }}
         onMouseEnter={(e) => (e.currentTarget.style.opacity = '0.85')}
         onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}
       >
-        {exportState.status === 'done' ? 'Export again' : `Export video${format ? ` (${format.label})` : ''}`}
+        {exportState.status === 'done' ? 'Export again' : compact ? 'Export video' : `Export video${format ? ` (${format.label})` : ''}`}
       </button>
     </div>
   );
