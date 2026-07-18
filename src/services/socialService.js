@@ -68,17 +68,46 @@ export async function getConnectedAccounts() {
 
 // Server-side burns the editor's on-screen text + captions (the overlay spec)
 // into the video with ffmpeg and returns a new download URL to post.
+//
+// Hosting caps the HTTP response at 60s but the render keeps running server-
+// side, so we pass a job id that fixes the output path (rendered/<jobId>.mp4)
+// and, if the response dies or 5xxs, poll Storage until the file appears.
 export async function renderOverlays(videoUrl, spec) {
-  const response = await fetch('/api/render', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ videoUrl, spec }),
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data?.error || `Render failed (${response.status})`);
+  await ensureAuth();
+  const jobId =
+    (typeof crypto !== 'undefined' && crypto.randomUUID && crypto.randomUUID()) ||
+    `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+  let hardError = null;
+  try {
+    const response = await fetch('/api/render', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ videoUrl, spec, jobId }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) return data; // { status, videoUrl, rendered }
+    if (response.status < 500) {
+      // Real validation/render error — polling won't help.
+      hardError = new Error(data?.error || `Render failed (${response.status})`);
+    }
+  } catch {
+    // Network-level death (Safari "Load failed") — fall through to polling.
   }
-  return data; // { status, videoUrl, rendered }
+  if (hardError) throw hardError;
+
+  const outRef = ref(storage, `rendered/${jobId}.mp4`);
+  const deadline = Date.now() + 8 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 5000));
+    try {
+      const url = await getDownloadURL(outRef);
+      return { status: 'ok', videoUrl: url, rendered: true };
+    } catch {
+      // not ready yet — keep waiting
+    }
+  }
+  throw new Error('Caption render timed out — the original video will be posted instead.');
 }
 
 export async function publishToSocial(mediaFile, { post, title, platforms, scheduleDate, onProgress, onPhase, spec, burnIn }) {
