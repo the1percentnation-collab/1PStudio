@@ -351,7 +351,7 @@ export default function App() {
           </div>
         </header>
 
-        <main style={{ padding: isMobile ? '20px 16px 96px' : '32px 34px 72px' }}>
+        <main style={{ padding: isMobile ? '20px 16px calc(92px + env(safe-area-inset-bottom, 0px))' : '32px 34px 72px' }}>
           <div style={{ maxWidth: contentMax, margin: '0 auto' }}>
             {renderView()}
           </div>
