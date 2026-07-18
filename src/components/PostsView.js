@@ -93,12 +93,12 @@ export default function PostsView({ posts, onNavigate, onRefresh, syncState = {}
       {/* SYNC STATE BANNERS */}
       {syncState.configured === false && (
         <div style={{ fontSize: 11, color: '#FFC107', lineHeight: 1.5, background: 'rgba(255,193,7,0.06)', border: '1px solid rgba(255,193,7,0.25)', borderRadius: 8, padding: '8px 12px', marginBottom: 14 }}>
-          Ayrshare isn’t configured — showing locally recorded posts only. Statuses may be stale.
+          Zernio isn’t configured — showing locally recorded posts only. Statuses may be stale.
         </div>
       )}
       {syncState.error && (
         <div style={{ fontSize: 11, color: '#FF6B6B', lineHeight: 1.5, background: 'rgba(255,68,68,0.06)', border: '1px solid rgba(255,68,68,0.25)', borderRadius: 8, padding: '8px 12px', marginBottom: 14 }}>
-          Couldn’t refresh from Ayrshare: {syncState.error}. Showing the last known statuses.
+          Couldn’t refresh from Zernio: {syncState.error}. Showing the last known statuses.
         </div>
       )}
 

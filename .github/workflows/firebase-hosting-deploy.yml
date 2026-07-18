@@ -37,7 +37,8 @@ jobs:
         env:
           GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          AYRSHARE_API_KEY: ${{ secrets.AYRSHARE_API_KEY }}
+          ZERNIO_API_KEY: ${{ secrets.ZERNIO_API_KEY }}
+          ZERNIO_PROFILE_ID: ${{ secrets.ZERNIO_PROFILE_ID }}
           DEEPGRAM_API_KEY: ${{ secrets.DEEPGRAM_API_KEY }}
         run: |
           echo "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/sa.json
@@ -47,12 +48,16 @@ jobs:
           # Strip stray CR/LF/whitespace from secret values so a valid,
           # single-line dotenv file is written, and skip empty keys.
           ANTHROPIC_CLEAN="$(printf '%s' "$ANTHROPIC_API_KEY" | tr -d '\r\n' | xargs)"
-          AYRSHARE_CLEAN="$(printf '%s' "$AYRSHARE_API_KEY" | tr -d '\r\n' | xargs)"
+          ZERNIO_CLEAN="$(printf '%s' "$ZERNIO_API_KEY" | tr -d '\r\n' | xargs)"
+          ZERNIO_PROFILE_CLEAN="$(printf '%s' "$ZERNIO_PROFILE_ID" | tr -d '\r\n' | xargs)"
           DEEPGRAM_CLEAN="$(printf '%s' "$DEEPGRAM_API_KEY" | tr -d '\r\n' | xargs)"
           {
             printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_CLEAN"
-            if [ -n "$AYRSHARE_CLEAN" ]; then
-              printf 'AYRSHARE_API_KEY=%s\n' "$AYRSHARE_CLEAN"
+            if [ -n "$ZERNIO_CLEAN" ]; then
+              printf 'ZERNIO_API_KEY=%s\n' "$ZERNIO_CLEAN"
+            fi
+            if [ -n "$ZERNIO_PROFILE_CLEAN" ]; then
+              printf 'ZERNIO_PROFILE_ID=%s\n' "$ZERNIO_PROFILE_CLEAN"
             fi
             if [ -n "$DEEPGRAM_CLEAN" ]; then
               printf 'DEEPGRAM_API_KEY=%s\n' "$DEEPGRAM_CLEAN"

@@ -124,6 +124,15 @@ const NAV = [
 ];
 
 export default function Sidebar({ active, onNavigate, counts = {}, isMobile = false }) {
+  const activeRef = React.useRef(null);
+
+  // Keep the selected tab visible in the scrollable mobile bar.
+  React.useEffect(() => {
+    if (isMobile && activeRef.current) {
+      activeRef.current.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+    }
+  }, [active, isMobile]);
+
   if (isMobile) {
     return (
       <nav
@@ -132,39 +141,91 @@ export default function Sidebar({ active, onNavigate, counts = {}, isMobile = fa
           left: 0,
           right: 0,
           bottom: 0,
-          height: 64,
-          background: 'rgba(13,13,13,0.96)',
-          backdropFilter: 'blur(8px)',
-          borderTop: '1px solid #1A1A1A',
-          display: 'flex',
+          background: 'rgba(12,12,12,0.85)',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          borderTop: `1px solid ${c.border}`,
           zIndex: 200,
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
         }}
       >
-        {NAV.map(({ id, label, icon }) => {
-          const isActive = active === id;
-          return (
-            <button
-              key={id}
-              onClick={() => onNavigate(id)}
-              style={{
-                flex: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 4,
-                background: 'transparent',
-                color: isActive ? '#E63329' : '#777',
-                fontSize: 10,
-                fontWeight: 600,
-                letterSpacing: '0.02em',
-              }}
-            >
-              <Icon name={icon} />
-              {label}
-            </button>
-          );
-        })}
+        {/* hide the horizontal scrollbar without losing scrollability */}
+        <style>{'.p1-tabbar::-webkit-scrollbar{display:none}'}</style>
+        <div
+          className="p1-tabbar"
+          style={{
+            display: 'flex',
+            gap: 6,
+            padding: '9px 10px',
+            overflowX: 'auto',
+            scrollbarWidth: 'none',
+            msOverflowStyle: 'none',
+            WebkitOverflowScrolling: 'touch',
+          }}
+        >
+          {NAV.map(({ id, label, icon }) => {
+            const isActive = active === id;
+            const count = counts[id];
+            return (
+              <button
+                key={id}
+                ref={isActive ? activeRef : undefined}
+                onClick={() => onNavigate(id)}
+                aria-current={isActive ? 'page' : undefined}
+                style={{
+                  flex: '0 0 auto',
+                  minWidth: 62,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 5,
+                  padding: '7px 12px',
+                  borderRadius: 14,
+                  background: isActive ? c.redGlow : 'transparent',
+                  border: `1px solid ${isActive ? 'rgba(230,51,41,0.28)' : 'transparent'}`,
+                  color: isActive ? '#E63329' : '#8A8A8A',
+                  fontFamily: f.body,
+                  fontSize: 10.5,
+                  fontWeight: 600,
+                  letterSpacing: '0.01em',
+                  whiteSpace: 'nowrap',
+                  transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+                }}
+              >
+                <span style={{ position: 'relative', display: 'flex' }}>
+                  <Icon name={icon} />
+                  {count > 0 && (
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: -6,
+                        right: -9,
+                        minWidth: 15,
+                        height: 15,
+                        padding: '0 4px',
+                        borderRadius: 8,
+                        background: c.red,
+                        color: '#fff',
+                        fontSize: 9,
+                        fontWeight: 700,
+                        fontFamily: f.mono,
+                        lineHeight: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: '0 0 0 2px rgba(12,12,12,0.9)',
+                      }}
+                    >
+                      {count > 99 ? '99+' : count}
+                    </span>
+                  )}
+                </span>
+                {label}
+              </button>
+            );
+          })}
+        </div>
       </nav>
     );
   }
