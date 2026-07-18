@@ -16,7 +16,7 @@ const labelStyle = {
   marginBottom: 6,
 };
 
-export default function CaptionControls({ captions, hasWords, onChange }) {
+export default function CaptionControls({ captions, hasWords, onChange, onGenerate, generating, generateMessage, generateError }) {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -42,8 +42,33 @@ export default function CaptionControls({ captions, hasWords, onChange }) {
       </div>
 
       {!hasWords && (
-        <div style={{ fontSize: 12, color: '#775500', background: '#FFC10711', border: '1px solid #FFC10733', borderRadius: 8, padding: '8px 10px', marginBottom: 14, lineHeight: 1.5 }}>
-          No word timings for this video — synced captions unavailable. Transcription may be off (Deepgram not configured) or it failed for this upload; try Regenerate on the card.
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, color: '#B8933B', background: '#FFC10711', border: '1px solid #FFC10733', borderRadius: 8, padding: '8px 10px', lineHeight: 1.5, marginBottom: 8 }}>
+            This video doesn’t have word timings yet — generate them to unlock synced captions.
+          </div>
+          <button
+            onClick={onGenerate}
+            disabled={generating || !onGenerate}
+            style={{
+              width: '100%',
+              background: generating ? '#1A1A1A' : '#E63329',
+              border: 'none',
+              color: generating ? '#888' : '#FFF',
+              fontSize: 13,
+              fontWeight: 700,
+              padding: '10px 14px',
+              borderRadius: 8,
+              cursor: generating ? 'default' : 'pointer',
+              transition: 'opacity 0.2s',
+            }}
+          >
+            {generating ? (generateMessage || 'Working…') : '🎙 Generate captions'}
+          </button>
+          {generateError && (
+            <div style={{ fontSize: 11.5, color: '#FF6B6B', lineHeight: 1.5, marginTop: 8, wordBreak: 'break-word' }}>
+              {generateError}
+            </div>
+          )}
         </div>
       )}
 

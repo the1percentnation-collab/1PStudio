@@ -4,6 +4,8 @@ import TextControls from './TextControls';
 import CaptionControls from './CaptionControls';
 import ExportPanel from './ExportPanel';
 import { createDefaultSpec, makeTextElement } from '../../services/overlayRenderer';
+import { uploadVideo } from '../../services/socialService';
+import { groupWordsIntoCaptions } from '../../services/captionUtils';
 
 function formatTime(t) {
   if (!Number.isFinite(t)) return '0:00';
@@ -75,6 +77,40 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec }) {
   const patchCaptions = useCallback((patch) => {
     setSpec((s) => ({ ...s, captions: { ...s.captions, ...patch } }));
   }, []);
+
+  // Word timings may be missing (re-linked Library video, or transcription
+  // failed during generation). Let the user transcribe on demand right here:
+  // upload the video, hit /api/transcribe, and drop the timed lines into the
+  // spec — no full Regenerate needed.
+  const [words, setWords] = useState(() => result.words || []);
+  const [capGen, setCapGen] = useState({ busy: false, message: null, error: null });
+
+  const generateCaptions = useCallback(async () => {
+    setCapGen({ busy: true, message: 'Preparing video…', error: null });
+    try {
+      const blob = await (await fetch(result.videoUrl)).blob();
+      const file = new File([blob], result.filename || 'video.mp4', { type: blob.type || 'video/mp4' });
+      const mediaUrl = await uploadVideo(file, (p) =>
+        setCapGen({ busy: true, message: `Uploading… ${Math.round(p * 100)}%`, error: null })
+      );
+      setCapGen({ busy: true, message: 'Transcribing…', error: null });
+      const res = await fetch('/api/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mediaUrl }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `Transcription failed (${res.status})`);
+      if (data.configured === false) throw new Error('Transcription isn’t configured on the server (Deepgram key missing).');
+      const newWords = Array.isArray(data.words) ? data.words : [];
+      if (newWords.length === 0) throw new Error('No speech was detected in this video.');
+      setWords(newWords);
+      patchCaptions({ enabled: true, lines: groupWordsIntoCaptions(newWords) });
+      setCapGen({ busy: false, message: null, error: null });
+    } catch (err) {
+      setCapGen({ busy: false, message: null, error: err?.message || 'Caption generation failed.' });
+    }
+  }, [result.videoUrl, result.filename, patchCaptions]);
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
@@ -193,8 +229,12 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec }) {
           <div style={{ borderTop: '1px solid #1A1A1A', margin: '18px 0' }} />
           <CaptionControls
             captions={spec.captions}
-            hasWords={(result.words || []).length > 0}
+            hasWords={words.length > 0}
             onChange={patchCaptions}
+            onGenerate={generateCaptions}
+            generating={capGen.busy}
+            generateMessage={capGen.message}
+            generateError={capGen.error}
           />
         </div>
       </div>
