@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { SOCIAL_PLATFORMS, publishToSocial } from '../services/socialService';
+import { createDefaultSpec } from '../services/overlayRenderer';
 
 // datetime-local inputs are LOCAL time; toISOString() alone is UTC and would
 // skew `min` by the user's timezone offset.
@@ -9,8 +10,25 @@ function minSchedule() {
   return d.toISOString().slice(0, 16);
 }
 
-export default function PublishPanel({ videoFile, content, onPublished, filename, thumbnail, mediaType }) {
+export default function PublishPanel({ videoFile, content, onPublished, filename, thumbnail, mediaType, overlaySpec, words, preRendered = false }) {
   const isPhoto = mediaType === 'photo';
+
+  // The overlay to burn in: the user's saved edits if any, else a default built
+  // from the generated on-screen text + caption word timings. `preRendered`
+  // means the caller already baked overlays into the file (e.g. Clips), so we
+  // must not burn them in again.
+  const editSpec = useMemo(() => {
+    if (isPhoto || preRendered) return null;
+    return overlaySpec || createDefaultSpec({ onScreenText: content?.on_screen_text || '', words: words || [] });
+  }, [isPhoto, preRendered, overlaySpec, content, words]);
+  const hasBurnable = Boolean(
+    editSpec && (
+      (editSpec.texts || []).some((t) => t.text && t.text.trim()) ||
+      (editSpec.captions?.enabled && (editSpec.captions.lines || []).length)
+    )
+  );
+  const [burnIn, setBurnIn] = useState(true);
+  const [phase, setPhase] = useState(null); // 'rendering' | 'publishing'
   // YouTube is video-only; photos post to Instagram as regular feed posts, not Reels.
   const platforms = SOCIAL_PLATFORMS
     .filter(({ id }) => !(isPhoto && id === 'youtube'))
@@ -56,6 +74,8 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
     setPosting(true);
     setStatus(null);
     setProgress(0);
+    setPhase(null);
+    const willBurn = burnIn && hasBurnable && !isPhoto;
     try {
       const result = await publishToSocial(videoFile, {
         post: caption,
@@ -63,6 +83,9 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
         platforms: selected,
         scheduleDate,
         onProgress: setProgress,
+        onPhase: setPhase,
+        spec: willBurn ? editSpec : null,
+        burnIn: willBurn,
       });
       // Ayrshare's post id lets us reconcile this record against real
       // outcomes later (scheduled posts can fail hours after being queued).
@@ -72,11 +95,14 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
         result?.ayrshare?.posts?.[0]?.id ??
         null;
       const isScheduled = Boolean(scheduleDate);
+      const base = isScheduled
+        ? `Scheduled for ${new Date(scheduleDate).toLocaleString()} on ${selected.length} platform${selected.length !== 1 ? 's' : ''}.`
+        : `Posted to ${selected.length} platform${selected.length !== 1 ? 's' : ''}.`;
       setStatus({
-        type: 'ok',
-        message: isScheduled
-          ? `Scheduled for ${new Date(scheduleDate).toLocaleString()} on ${selected.length} platform${selected.length !== 1 ? 's' : ''}.`
-          : `Posted to ${selected.length} platform${selected.length !== 1 ? 's' : ''}.`,
+        type: result?.renderWarning ? 'pending' : 'ok',
+        message: result?.renderWarning
+          ? `${base} Note: on-screen text/captions couldn’t be burned in this time (${result.renderWarning}), so the original video was posted.`
+          : willBurn ? `${base} On-screen text & captions burned in.` : base,
       });
       if (onPublished) {
         onPublished({
@@ -109,6 +135,7 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
       }
     } finally {
       setPosting(false);
+      setPhase(null);
     }
   };
 
@@ -231,6 +258,24 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
         }}
       />
 
+      {/* BURN-IN OVERLAYS */}
+      {hasBurnable && !isPhoto && (
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, color: '#CCC', marginBottom: 10, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={burnIn}
+            onChange={(e) => setBurnIn(e.target.checked)}
+            style={{ accentColor: '#E63329', width: 15, height: 15, marginTop: 1, flexShrink: 0 }}
+          />
+          <span>
+            Burn on-screen text &amp; captions into the video
+            <span style={{ display: 'block', color: '#666', fontSize: 11, marginTop: 2 }}>
+              Renders the text onto the video before posting (adds a little time).
+            </span>
+          </span>
+        </label>
+      )}
+
       {/* SCHEDULE */}
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#999', marginBottom: scheduleOn ? 8 : 10, cursor: 'pointer' }}>
         <input
@@ -282,7 +327,11 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
             />
           </div>
           <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>
-            {uploadPct < 100 ? `Uploading ${isPhoto ? 'photo' : 'video'}… ${uploadPct}%` : 'Publishing to platforms…'}
+            {phase === 'rendering'
+              ? 'Burning in on-screen text & captions…'
+              : phase === 'publishing' || uploadPct >= 100
+                ? 'Publishing to platforms…'
+                : `Uploading ${isPhoto ? 'photo' : 'video'}… ${uploadPct}%`}
           </div>
         </div>
       )}

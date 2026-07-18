@@ -50,6 +50,11 @@
         "region": "us-central1"
       },
       {
+        "source": "/api/render",
+        "function": "renderOverlays",
+        "region": "us-central1"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

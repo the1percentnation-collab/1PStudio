@@ -799,6 +799,225 @@ export const captionVideo = onRequest(
 );
 
 // ---------------------------------------------------------------------------
+// Overlay render — burns the editor's on-screen text + word-synced captions
+// into the video with ffmpeg, so a published post carries the branded text on
+// the video pixels (not just as caption/description text).
+//
+// The client sends the same serializable overlay spec the in-browser editor
+// uses (texts[] + captions{} + optional clip{}); we translate it to an ASS
+// subtitle file and burn it in. Positions/sizes in the spec are video-relative
+// fractions, matching the canvas preview.
+// ---------------------------------------------------------------------------
+
+interface SpecText {
+  text?: string; x?: number; y?: number; size?: number;
+  color?: string; weight?: number;
+  outline?: { color?: string; width?: number } | null;
+  start?: number; end?: number | null;
+}
+interface SpecCaptionLine { text?: string; start?: number; end?: number }
+interface SpecCaptions {
+  enabled?: boolean; size?: number; y?: number; lines?: SpecCaptionLine[];
+}
+interface OverlaySpec {
+  texts?: SpecText[];
+  captions?: SpecCaptions;
+  clip?: { start?: number; end?: number } | null;
+}
+
+// #RRGGBB -> ASS &H00BBGGRR (opaque). Falls back to white.
+function assColor(hex?: string): string {
+  const h = (hex ?? "").replace("#", "");
+  if (h.length < 6) return "&H00FFFFFF";
+  return `&H00${h.slice(4, 6)}${h.slice(2, 4)}${h.slice(0, 2)}`.toUpperCase();
+}
+
+function assEsc(s: string): string {
+  return String(s).replace(/\\/g, "").replace(/[{}]/g, "").replace(/\r?\n/g, "\\N");
+}
+
+// Greedy word-wrap to a target line width (in characters), honoring explicit
+// newlines. Mirrors the editor's canvas wrapping so long on-screen text doesn't
+// run off the frame. Returns lines joined with the ASS newline (\N).
+function wrapAss(text: string, maxChars: number): string {
+  const lines: string[] = [];
+  for (const para of String(text).split(/\r?\n/)) {
+    const words = para.split(/\s+/).filter(Boolean);
+    if (words.length === 0) { lines.push(""); continue; }
+    let line = "";
+    for (const w of words) {
+      const cand = line ? `${line} ${w}` : w;
+      if (line && cand.length > maxChars) { lines.push(line); line = w; } else { line = cand; }
+    }
+    if (line) lines.push(line);
+  }
+  return assEsc(lines.join("\n"));
+}
+
+// Returns the ASS document plus how many burn events it produced (0 = nothing
+// to render, caller can skip ffmpeg and post the original).
+function buildOverlayAss(
+  spec: OverlaySpec, width: number, height: number, duration: number, clipStart: number
+): { ass: string; count: number } {
+  const events: string[] = [];
+
+  for (const el of spec.texts ?? []) {
+    if (!el.text || !el.text.trim()) continue;
+    const start = Math.max(0, (el.start ?? 0) - clipStart);
+    const end = Math.max(start, (el.end == null ? duration : el.end) - clipStart);
+    const fs = Math.max(8, Math.round((el.size ?? 0.05) * height));
+    const cx = Math.round((el.x ?? 0.5) * width);
+    const cy = Math.round((el.y ?? 0.5) * height);
+    const bord = el.outline === null ? 0 : Math.max(1, Math.round((el.outline?.width ?? 0.12) * fs));
+    const bold = (el.weight ?? 400) >= 600 ? 1 : 0;
+    const tags = `\\an5\\pos(${cx},${cy})\\fs${fs}\\c${assColor(el.color ?? "#FFFFFF")}` +
+      `\\3c${assColor(el.outline?.color ?? "#000000")}\\bord${bord}\\shad0\\b${bold}`;
+    // Wrap to ~90% of frame width; Arial glyphs average ~0.52·fontsize wide.
+    const maxChars = Math.max(6, Math.floor((0.9 * width) / (fs * 0.52)));
+    events.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Txt,,0,0,0,,{${tags}}${wrapAss(el.text, maxChars)}`);
+  }
+
+  const caps = spec.captions;
+  if (caps?.enabled && Array.isArray(caps.lines)) {
+    const fs = Math.max(8, Math.round((caps.size ?? 0.042) * height));
+    const cx = Math.round(width / 2);
+    const cy = Math.round((caps.y ?? 0.72) * height);
+    const bord = Math.max(2, Math.round(fs * 0.16));
+    for (const line of caps.lines) {
+      const text = String(line.text ?? "").toUpperCase();
+      if (!text.trim()) continue;
+      const start = Math.max(0, (line.start ?? 0) - clipStart);
+      const end = Math.max(start, (line.end ?? start) - clipStart);
+      const tags = `\\an5\\pos(${cx},${cy})\\fs${fs}\\c&H00FFFFFF&\\3c&H00000000&\\bord${bord}\\shad0\\b1`;
+      const maxChars = Math.max(6, Math.floor((0.9 * width) / (fs * 0.52)));
+      events.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Cap,,0,0,0,,{${tags}}${wrapAss(text, maxChars)}`);
+    }
+  }
+
+  const styleLine = (name: string) =>
+    `Style: ${name},Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,3,0,5,40,40,40,1`;
+  const ass = `[Script Info]
+ScriptType: v4.00+
+PlayResX: ${width}
+PlayResY: ${height}
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+${styleLine("Txt")}
+${styleLine("Cap")}
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+${events.join("\n")}
+`;
+  return { ass, count: events.length };
+}
+
+async function probeMeta(file: string): Promise<{ width: number; height: number; duration: number }> {
+  try {
+    const { stdout } = await run(ffprobePath, [
+      "-v", "quiet", "-print_format", "json", "-show_streams", "-show_format", file,
+    ]);
+    const data = JSON.parse(stdout) as {
+      streams?: { codec_type?: string; width?: number; height?: number; duration?: string }[];
+      format?: { duration?: string };
+    };
+    const v = (data.streams ?? []).find((s) => s.codec_type === "video");
+    const duration = Number(data.format?.duration ?? v?.duration ?? 0) || 0;
+    if (v?.width && v?.height) return { width: v.width, height: v.height, duration };
+  } catch {
+    /* fall through */
+  }
+  return { width: 1080, height: 1920, duration: 0 };
+}
+
+export const renderOverlays = onRequest(
+  {
+    cors: true,
+    timeoutSeconds: 540,
+    memory: "2GiB",
+  },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+
+    const { videoUrl, spec } = (req.body ?? {}) as { videoUrl?: string; spec?: OverlaySpec };
+    if (!videoUrl || !/^https?:\/\//.test(videoUrl)) {
+      res.status(400).json({ error: "A valid video URL is required." });
+      return;
+    }
+
+    const hasText = (spec?.texts ?? []).some((t) => t.text && t.text.trim());
+    const hasCaptions = Boolean(spec?.captions?.enabled && (spec?.captions?.lines ?? []).length);
+    if (!spec || (!hasText && !hasCaptions)) {
+      // Nothing to burn in — hand the original back so the caller can post it.
+      res.json({ status: "ok", videoUrl, rendered: false });
+      return;
+    }
+
+    const work = path.join(os.tmpdir(), randomUUID());
+    const inputPath = `${work}-in.mp4`;
+    const assPath = `${work}-ov.ass`;
+    const outputPath = `${work}-out.mp4`;
+
+    try {
+      await downloadTo(videoUrl, inputPath);
+      const { width, height, duration } = await probeMeta(inputPath);
+
+      const clip = spec.clip && Number.isFinite(Number(spec.clip.start)) ? spec.clip : null;
+      const clipStart = clip ? Number(clip.start) : 0;
+      const clipDur = clip ? Math.max(0, Number(clip.end) - clipStart) : 0;
+
+      const { ass, count } = buildOverlayAss(spec, width, height, duration || 3600, clipStart);
+      if (count === 0) {
+        res.json({ status: "ok", videoUrl, rendered: false });
+        return;
+      }
+      await fs.writeFile(assPath, ass);
+
+      const args = ["-y"];
+      if (clip && clipDur > 0) args.push("-ss", String(clipStart), "-t", String(clipDur));
+      args.push(
+        "-i", inputPath,
+        "-vf", `subtitles=${assPath}`,
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-movflags", "+faststart",
+        outputPath,
+      );
+      await run(ffmpegPath, args);
+
+      const bucket = getStorage().bucket();
+      const token = randomUUID();
+      const objectPath = `rendered/${Date.now()}-${randomUUID()}.mp4`;
+      await bucket.upload(outputPath, {
+        destination: objectPath,
+        resumable: false,
+        metadata: { contentType: "video/mp4", metadata: { firebaseStorageDownloadTokens: token } },
+      });
+      const outUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(
+        objectPath
+      )}?alt=media&token=${token}`;
+
+      res.json({ status: "ok", videoUrl: outUrl, rendered: true });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : "Overlay render failed." });
+    } finally {
+      await Promise.all(
+        [inputPath, assPath, outputPath].map((f) => fs.unlink(f).catch(() => undefined))
+      );
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
 // Transcription — returns the spoken text of a video (Deepgram). Used by the
 // Composer flow so Claude grades the actual content, not just still frames.
 // Best-effort: returns an empty transcript (not an error) when unconfigured,
