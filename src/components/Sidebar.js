@@ -125,15 +125,54 @@ const NAV = [
 
 export default function Sidebar({ active, onNavigate, counts = {}, isMobile = false }) {
   const activeRef = React.useRef(null);
+  const scrollRef = React.useRef(null);
+  // Which directions the mobile tab bar can still scroll toward.
+  const [edges, setEdges] = React.useState({ start: false, end: false });
 
-  // Keep the selected tab visible in the scrollable mobile bar.
+  const updateEdges = React.useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const maxScroll = el.scrollWidth - el.clientWidth;
+    setEdges({
+      start: el.scrollLeft > 2,
+      end: el.scrollLeft < maxScroll - 2,
+    });
+  }, []);
+
+  // Keep the selected tab visible, and recompute the scroll affordances.
   React.useEffect(() => {
     if (isMobile && activeRef.current) {
       activeRef.current.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
     }
   }, [active, isMobile]);
 
+  React.useEffect(() => {
+    if (!isMobile) return undefined;
+    updateEdges();
+    window.addEventListener('resize', updateEdges);
+    return () => window.removeEventListener('resize', updateEdges);
+  }, [isMobile, updateEdges]);
+
+  const nudge = React.useCallback((dir) => {
+    scrollRef.current?.scrollBy({ left: dir * 160, behavior: 'smooth' });
+  }, []);
+
   if (isMobile) {
+    const arrowBase = {
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      width: 40,
+      border: 'none',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      color: '#E63329',
+      fontSize: 26,
+      lineHeight: 1,
+      paddingBottom: 4,
+      zIndex: 3,
+    };
     return (
       <nav
         style={{
@@ -151,80 +190,116 @@ export default function Sidebar({ active, onNavigate, counts = {}, isMobile = fa
       >
         {/* hide the horizontal scrollbar without losing scrollability */}
         <style>{'.p1-tabbar::-webkit-scrollbar{display:none}'}</style>
-        <div
-          className="p1-tabbar"
-          style={{
-            display: 'flex',
-            gap: 6,
-            padding: '9px 10px',
-            overflowX: 'auto',
-            scrollbarWidth: 'none',
-            msOverflowStyle: 'none',
-            WebkitOverflowScrolling: 'touch',
-          }}
-        >
-          {NAV.map(({ id, label, icon }) => {
-            const isActive = active === id;
-            const count = counts[id];
-            return (
-              <button
-                key={id}
-                ref={isActive ? activeRef : undefined}
-                onClick={() => onNavigate(id)}
-                aria-current={isActive ? 'page' : undefined}
-                style={{
-                  flex: '0 0 auto',
-                  minWidth: 62,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 5,
-                  padding: '7px 12px',
-                  borderRadius: 14,
-                  background: isActive ? c.redGlow : 'transparent',
-                  border: `1px solid ${isActive ? 'rgba(230,51,41,0.28)' : 'transparent'}`,
-                  color: isActive ? '#E63329' : '#8A8A8A',
-                  fontFamily: f.body,
-                  fontSize: 10.5,
-                  fontWeight: 600,
-                  letterSpacing: '0.01em',
-                  whiteSpace: 'nowrap',
-                  transition: 'background 0.15s, color 0.15s, border-color 0.15s',
-                }}
-              >
-                <span style={{ position: 'relative', display: 'flex' }}>
-                  <Icon name={icon} />
-                  {count > 0 && (
-                    <span
-                      style={{
-                        position: 'absolute',
-                        top: -6,
-                        right: -9,
-                        minWidth: 15,
-                        height: 15,
-                        padding: '0 4px',
-                        borderRadius: 8,
-                        background: c.red,
-                        color: '#fff',
-                        fontSize: 9,
-                        fontWeight: 700,
-                        fontFamily: f.mono,
-                        lineHeight: 1,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        boxShadow: '0 0 0 2px rgba(12,12,12,0.9)',
-                      }}
-                    >
-                      {count > 99 ? '99+' : count}
-                    </span>
-                  )}
-                </span>
-                {label}
-              </button>
-            );
-          })}
+        <div style={{ position: 'relative' }}>
+          <div
+            ref={scrollRef}
+            className="p1-tabbar"
+            onScroll={updateEdges}
+            style={{
+              display: 'flex',
+              gap: 6,
+              padding: '9px 10px',
+              overflowX: 'auto',
+              scrollbarWidth: 'none',
+              msOverflowStyle: 'none',
+              WebkitOverflowScrolling: 'touch',
+            }}
+          >
+            {NAV.map(({ id, label, icon }) => {
+              const isActive = active === id;
+              const count = counts[id];
+              return (
+                <button
+                  key={id}
+                  ref={isActive ? activeRef : undefined}
+                  onClick={() => onNavigate(id)}
+                  aria-current={isActive ? 'page' : undefined}
+                  style={{
+                    flex: '0 0 auto',
+                    minWidth: 62,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 5,
+                    padding: '7px 12px',
+                    borderRadius: 14,
+                    background: isActive ? c.redGlow : 'transparent',
+                    border: `1px solid ${isActive ? 'rgba(230,51,41,0.28)' : 'transparent'}`,
+                    color: isActive ? '#E63329' : '#8A8A8A',
+                    fontFamily: f.body,
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    letterSpacing: '0.01em',
+                    whiteSpace: 'nowrap',
+                    transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+                  }}
+                >
+                  <span style={{ position: 'relative', display: 'flex' }}>
+                    <Icon name={icon} />
+                    {count > 0 && (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          top: -6,
+                          right: -9,
+                          minWidth: 15,
+                          height: 15,
+                          padding: '0 4px',
+                          borderRadius: 8,
+                          background: c.red,
+                          color: '#fff',
+                          fontSize: 9,
+                          fontWeight: 700,
+                          fontFamily: f.mono,
+                          lineHeight: 1,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          boxShadow: '0 0 0 2px rgba(12,12,12,0.9)',
+                        }}
+                      >
+                        {count > 99 ? '99+' : count}
+                      </span>
+                    )}
+                  </span>
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* scroll affordances — fade + tappable chevron on each scrollable side */}
+          {edges.start && (
+            <button
+              onClick={() => nudge(-1)}
+              aria-label="Scroll tabs left"
+              style={{
+                ...arrowBase,
+                left: 0,
+                justifyContent: 'flex-start',
+                paddingLeft: 6,
+                background: 'linear-gradient(to right, rgba(12,12,12,0.97) 45%, rgba(12,12,12,0))',
+              }}
+            >
+              ‹
+            </button>
+          )}
+          {edges.end && (
+            <button
+              onClick={() => nudge(1)}
+              aria-label="Scroll tabs right"
+              style={{
+                ...arrowBase,
+                right: 0,
+                justifyContent: 'flex-end',
+                paddingRight: 6,
+                background: 'linear-gradient(to left, rgba(12,12,12,0.97) 45%, rgba(12,12,12,0))',
+              }}
+            >
+              ›
+            </button>
+          )}
         </div>
       </nav>
     );
