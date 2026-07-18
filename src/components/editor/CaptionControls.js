@@ -3,7 +3,7 @@ import React from 'react';
 const PRESETS = [
   { key: 'outline', label: 'Outline', sample: { color: '#FFF', textShadow: '-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000' } },
   { key: 'block', label: 'Block', sample: { color: '#FFF', background: 'rgba(0,0,0,0.85)', padding: '2px 8px', borderRadius: 4 } },
-  { key: 'karaoke', label: 'Karaoke', sample: { color: '#E60306', textShadow: '-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000' } },
+  { key: 'karaoke', label: 'Karaoke', sample: { color: '#E63329', textShadow: '-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000' } },
 ];
 
 const labelStyle = {
@@ -27,8 +27,8 @@ export default function CaptionControls({ captions, hasWords, onChange }) {
           onClick={() => onChange({ enabled: !captions.enabled })}
           disabled={!hasWords}
           style={{
-            background: captions.enabled ? '#E6030622' : '#0A0A0A',
-            border: `1px solid ${captions.enabled ? '#E60306' : '#2A2A2A'}`,
+            background: captions.enabled ? '#E6332922' : '#0A0A0A',
+            border: `1px solid ${captions.enabled ? '#E63329' : '#2A2A2A'}`,
             color: !hasWords ? '#444' : captions.enabled ? '#FFF' : '#666',
             fontSize: 12,
             padding: '5px 12px',
@@ -58,8 +58,8 @@ export default function CaptionControls({ captions, hasWords, onChange }) {
                   onClick={() => onChange({ preset: p.key })}
                   style={{
                     flex: 1,
-                    background: captions.preset === p.key ? '#E6030611' : '#0A0A0A',
-                    border: `1px solid ${captions.preset === p.key ? '#E60306' : '#2A2A2A'}`,
+                    background: captions.preset === p.key ? '#E6332911' : '#0A0A0A',
+                    border: `1px solid ${captions.preset === p.key ? '#E63329' : '#2A2A2A'}`,
                     borderRadius: 8,
                     padding: '10px 4px 8px',
                     cursor: 'pointer',
@@ -89,7 +89,7 @@ export default function CaptionControls({ captions, hasWords, onChange }) {
                 step={0.002}
                 value={captions.size}
                 onChange={(e) => onChange({ size: Number(e.target.value) })}
-                style={{ width: '100%', accentColor: '#E60306' }}
+                style={{ width: '100%', accentColor: '#E63329' }}
               />
             </div>
             <div style={{ flex: 1 }}>
@@ -101,7 +101,7 @@ export default function CaptionControls({ captions, hasWords, onChange }) {
                 step={0.01}
                 value={captions.y}
                 onChange={(e) => onChange({ y: Number(e.target.value) })}
-                style={{ width: '100%', accentColor: '#E60306' }}
+                style={{ width: '100%', accentColor: '#E63329' }}
               />
             </div>
           </div>

@@ -27,18 +27,18 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #E60306;
+  background: #E63329;
   border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #ff1a1a;
+  background: #F5453A;
 }
 
 /* Firefox scrollbar */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #E60306 #0A0A0A;
+  scrollbar-color: #E63329 #0A0A0A;
 }
 
 button {

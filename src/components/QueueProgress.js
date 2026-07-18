@@ -2,7 +2,7 @@ import React from 'react';
 
 const STATUS_COLORS = {
   waiting: '#333333',
-  processing: '#E60306',
+  processing: '#E63329',
   done: '#00C48C',
   error: '#FF4444',
 };
@@ -53,7 +53,7 @@ export default function QueueProgress({ queue }) {
   const barFillStyle = {
     height: '100%',
     width: `${pct}%`,
-    background: '#E60306',
+    background: '#E63329',
     borderRadius: 2,
     transition: 'width 0.4s ease',
   };

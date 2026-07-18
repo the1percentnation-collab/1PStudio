@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { colors as c, fonts as f } from '../theme';
 
 export default function DropZone({ onFilesSelected, processing }) {
   const [dragging, setDragging] = useState(false);
@@ -7,36 +8,37 @@ export default function DropZone({ onFilesSelected, processing }) {
   const icon = dragging ? '🎯' : '🎬';
 
   const containerStyle = {
-    border: `2px dashed ${dragging ? '#E60306' : '#1A1A1A'}`,
-    borderRadius: 12,
-    padding: '48px 32px',
+    border: `1.5px dashed ${dragging ? c.red : c.border}`,
+    borderRadius: 16,
+    padding: '52px 32px',
     textAlign: 'center',
     cursor: processing ? 'not-allowed' : 'pointer',
     opacity: processing ? 0.5 : 1,
-    transition: 'border-color 0.2s, opacity 0.2s',
-    background: dragging ? 'rgba(230,3,6,0.05)' : 'transparent',
+    transition: 'border-color 0.2s, opacity 0.2s, background 0.2s',
+    background: dragging ? c.redGlow : c.surface,
     userSelect: 'none',
   };
 
   const iconStyle = {
-    fontSize: 48,
+    fontSize: 46,
     display: 'block',
     marginBottom: 16,
     transition: 'transform 0.2s',
-    transform: dragging ? 'scale(1.1)' : 'scale(1)',
+    transform: dragging ? 'scale(1.12)' : 'scale(1)',
   };
 
   const headingStyle = {
-    fontFamily: "'Bebas Neue', sans-serif",
-    fontSize: 28,
-    letterSpacing: '0.05em',
+    fontFamily: f.display,
+    fontSize: 30,
+    letterSpacing: '0.02em',
+    textTransform: 'uppercase',
     color: '#FFFFFF',
-    marginBottom: 8,
+    marginBottom: 10,
   };
 
   const subStyle = {
-    fontSize: 14,
-    color: '#888',
+    fontSize: 13.5,
+    color: c.textDim,
     lineHeight: 1.5,
   };
 
@@ -72,14 +74,14 @@ export default function DropZone({ onFilesSelected, processing }) {
 
   if (processing) {
     return (
-      <div style={{ ...containerStyle, cursor: 'default', borderColor: '#E60306', borderStyle: 'solid', background: 'rgba(230,3,6,0.04)' }}>
+      <div style={{ ...containerStyle, cursor: 'default', borderColor: c.redDim, borderStyle: 'solid', background: c.redGlow }}>
         <div
           style={{
             width: 52,
             height: 52,
             margin: '0 auto 18px',
-            border: '4px solid #1A1A1A',
-            borderTopColor: '#E60306',
+            border: `4px solid ${c.border}`,
+            borderTopColor: c.red,
             borderRadius: '50%',
             animation: 'spin 0.8s linear infinite',
           }}
@@ -106,7 +108,7 @@ export default function DropZone({ onFilesSelected, processing }) {
       <div style={subStyle}>
         Drag &amp; drop up to 20 videos or photos, or click to browse
       </div>
-      <div style={{ fontSize: 12, color: '#555', marginTop: 8, lineHeight: 1.5 }}>
+      <div style={{ fontSize: 12, color: c.textFaint, marginTop: 8, lineHeight: 1.5 }}>
         Tip: long or 4K iPhone videos are large and load slowly, especially from iCloud.
         For speed, use Wi-Fi and pick shorter clips already downloaded to your device.
       </div>

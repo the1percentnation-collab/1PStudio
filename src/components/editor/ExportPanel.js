@@ -51,7 +51,7 @@ export default function ExportPanel({ videoUrl, spec, filename, duration, export
             Rendering… {Math.round(exportState.progress * 100)}% — keep this tab visible
           </div>
           <div style={{ height: 4, background: '#1A1A1A', borderRadius: 2, overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${exportState.progress * 100}%`, background: '#E60306', transition: 'width 0.3s' }} />
+            <div style={{ height: '100%', width: `${exportState.progress * 100}%`, background: '#E63329', transition: 'width 0.3s' }} />
           </div>
         </div>
         <button
@@ -97,7 +97,7 @@ export default function ExportPanel({ videoUrl, spec, filename, duration, export
       <button
         onClick={handleExport}
         style={{
-          background: '#E60306',
+          background: '#E63329',
           color: '#FFF',
           fontSize: 13,
           fontWeight: 700,

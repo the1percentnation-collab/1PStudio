@@ -15,6 +15,8 @@ import { generateTikTokContent } from './services/claudeService';
 import { syncPostHistory } from './services/postSync';
 import VideoEditorModal from './components/editor/VideoEditorModal';
 import TextPostCreator from './components/TextPostCreator';
+import { GlowBackground, Eyebrow } from './components/ui';
+import { colors as c, fonts as f } from './theme';
 
 const LIBRARY_KEY = '1p-studio-library';
 const POSTS_KEY = '1p-studio-posts';
@@ -256,24 +258,31 @@ export default function App() {
     // composer
     return (
       <>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 18, flexWrap: 'wrap' }}>
+          <div>
+            <Eyebrow style={{ marginBottom: 12 }}>Content Composer</Eyebrow>
+            <div style={{ fontFamily: f.display, fontSize: 34, textTransform: 'uppercase', color: '#fff', lineHeight: 0.95 }}>
+              Generate &amp; <span style={{ color: c.red }}>publish.</span>
+            </div>
+          </div>
           <button
             onClick={() => setShowTextCreator(true)}
             disabled={processing}
             style={{
-              background: '#111',
-              border: '1px solid #2A2A2A',
-              borderRadius: 10,
-              padding: '10px 16px',
+              background: c.inset,
+              border: `1px solid ${c.border}`,
+              borderRadius: 12,
+              padding: '11px 18px',
               color: '#FFF',
+              fontFamily: f.body,
               fontSize: 13,
               fontWeight: 600,
               cursor: processing ? 'not-allowed' : 'pointer',
               opacity: processing ? 0.5 : 1,
               transition: 'border-color 0.2s',
             }}
-            onMouseEnter={(e) => { if (!processing) e.currentTarget.style.borderColor = '#E60306'; }}
-            onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#2A2A2A')}
+            onMouseEnter={(e) => { if (!processing) e.currentTarget.style.borderColor = c.redDim; }}
+            onMouseLeave={(e) => (e.currentTarget.style.borderColor = c.border)}
           >
             ✍️ Create Text Post
           </button>
@@ -288,9 +297,9 @@ export default function App() {
 
         {results.length > 0 && (
           <div style={{ marginTop: 32 }}>
-            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, letterSpacing: '0.06em', color: '#555', marginBottom: 16 }}>
-              GENERATED CONTENT — {results.length} post{results.length !== 1 ? 's' : ''}
-            </div>
+            <Eyebrow dash dot={false} style={{ marginBottom: 16 }}>
+              Generated Content — {results.length} post{results.length !== 1 ? 's' : ''}
+            </Eyebrow>
             {results.map((result) => (
               <VideoCard
                 key={result.id}
@@ -308,41 +317,41 @@ export default function App() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0A0A0A' }}>
+    <div style={{ minHeight: '100vh', background: c.bg, color: c.text, fontFamily: f.body }}>
+      <GlowBackground />
       <Sidebar active={view} onNavigate={setView} counts={{ library: library.length }} isMobile={isMobile} />
 
-      <div style={{ marginLeft: isMobile ? 0 : 220 }}>
+      <div style={{ marginLeft: isMobile ? 0 : 232, position: 'relative', zIndex: 1 }}>
         {/* TOP BAR */}
         <header
           style={{
             position: 'sticky',
             top: 0,
             zIndex: 100,
-            height: 60,
-            background: 'rgba(10,10,10,0.92)',
-            backdropFilter: 'blur(8px)',
-            borderBottom: '1px solid #1A1A1A',
+            height: 72,
+            background: 'rgba(10,10,10,0.82)',
+            backdropFilter: 'blur(12px)',
+            borderBottom: `1px solid ${c.border}`,
             display: 'flex',
             alignItems: 'center',
             gap: 14,
-            padding: isMobile ? '0 18px' : '0 32px',
+            padding: isMobile ? '0 18px' : '0 34px',
           }}
         >
           {isMobile && (
-            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, letterSpacing: '0.04em', flexShrink: 0 }}>
-              <span style={{ color: '#E60306' }}>1P</span>
-              <span style={{ color: '#FFFFFF', marginLeft: 4 }}>STUDIO</span>
+            <div style={{ width: 30, height: 30, borderRadius: 8, background: '#000', border: `1px solid ${c.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: f.display, fontSize: 15, color: '#fff', flexShrink: 0 }}>
+              1P
             </div>
           )}
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, letterSpacing: '0.04em', color: '#FFF', lineHeight: 1 }}>
-              {meta.title.toUpperCase()}
+            {!isMobile && <Eyebrow style={{ fontSize: 10.5, marginBottom: 5 }}>{meta.subtitle}</Eyebrow>}
+            <div style={{ fontFamily: f.display, fontSize: 24, letterSpacing: '0.02em', color: '#FFF', lineHeight: 0.9, textTransform: 'uppercase' }}>
+              {meta.title}
             </div>
-            {!isMobile && <div style={{ fontSize: 12, color: '#555', marginTop: 3 }}>{meta.subtitle}</div>}
           </div>
         </header>
 
-        <main style={{ padding: isMobile ? '18px 16px 96px' : '28px 32px 64px' }}>
+        <main style={{ padding: isMobile ? '20px 16px 96px' : '32px 34px 72px' }}>
           <div style={{ maxWidth: contentMax, margin: '0 auto' }}>
             {renderView()}
           </div>

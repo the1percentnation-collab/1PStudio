@@ -1,6 +1,6 @@
 import React from 'react';
 
-const SWATCHES = ['#FFFFFF', '#E60306', '#000000', '#FFC107'];
+const SWATCHES = ['#FFFFFF', '#E63329', '#000000', '#FFC107'];
 const FONTS = ['Bebas Neue', 'DM Sans', 'Arial'];
 
 const labelStyle = {
@@ -20,8 +20,8 @@ function Toggle({ label, on, onChange }) {
     <button
       onClick={() => onChange(!on)}
       style={{
-        background: on ? '#E6030622' : '#0A0A0A',
-        border: `1px solid ${on ? '#E60306' : '#2A2A2A'}`,
+        background: on ? '#E6332922' : '#0A0A0A',
+        border: `1px solid ${on ? '#E63329' : '#2A2A2A'}`,
         color: on ? '#FFF' : '#666',
         fontSize: 12,
         padding: '5px 10px',
@@ -73,8 +73,8 @@ export default function TextControls({ texts, selectedId, duration, onChange, on
               key={t.id}
               onClick={() => onSelect(t.id)}
               style={{
-                background: t.id === selectedId ? '#E6030622' : '#0A0A0A',
-                border: `1px solid ${t.id === selectedId ? '#E60306' : '#2A2A2A'}`,
+                background: t.id === selectedId ? '#E6332922' : '#0A0A0A',
+                border: `1px solid ${t.id === selectedId ? '#E63329' : '#2A2A2A'}`,
                 color: t.id === selectedId ? '#FFF' : '#888',
                 fontSize: 11,
                 padding: '4px 10px',
@@ -153,7 +153,7 @@ export default function TextControls({ texts, selectedId, duration, onChange, on
                 step={0.002}
                 value={selected.size}
                 onChange={(e) => onChange(selected.id, { size: Number(e.target.value) })}
-                style={{ width: '100%', accentColor: '#E60306' }}
+                style={{ width: '100%', accentColor: '#E63329' }}
               />
             </div>
           </div>
@@ -171,7 +171,7 @@ export default function TextControls({ texts, selectedId, duration, onChange, on
                     height: 24,
                     borderRadius: '50%',
                     background: c,
-                    border: selected.color === c ? '2px solid #E60306' : '2px solid #333',
+                    border: selected.color === c ? '2px solid #E63329' : '2px solid #333',
                     cursor: 'pointer',
                     padding: 0,
                   }}

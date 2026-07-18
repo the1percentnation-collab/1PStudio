@@ -114,7 +114,7 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec }) {
         }}
       >
         <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, letterSpacing: '0.05em' }}>
-          <span style={{ color: '#E60306' }}>VIDEO</span>
+          <span style={{ color: '#E63329' }}>VIDEO</span>
           <span style={{ color: '#FFF', marginLeft: 6 }}>EDITOR</span>
         </div>
         <div style={{ flex: 1, fontSize: 12, color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -134,7 +134,7 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec }) {
             cursor: 'pointer',
             transition: 'border-color 0.2s',
           }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#E60306')}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#E63329')}
           onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#333')}
         >
           ✕
@@ -223,7 +223,7 @@ export default function VideoEditorModal({ result, onClose, onSaveSpec }) {
           value={Math.min(currentTime, duration || 0)}
           onChange={handleScrub}
           disabled={isRendering}
-          style={{ flex: 1, accentColor: '#E60306' }}
+          style={{ flex: 1, accentColor: '#E63329' }}
         />
         <span style={{ fontSize: 12, color: '#888', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
           {formatTime(currentTime)} / {formatTime(duration)}

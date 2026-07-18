@@ -50,7 +50,7 @@ export default function PostsView({ posts, onNavigate, onRefresh, syncState = {}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 14 }}>
         {FILTERS.map(({ id, label }) => {
           const active = filter === id;
-          const accent = id === 'all' ? '#E60306' : statusColor(id);
+          const accent = id === 'all' ? '#E63329' : statusColor(id);
           return (
             <button
               key={id}
@@ -111,7 +111,7 @@ export default function PostsView({ posts, onNavigate, onRefresh, syncState = {}
           {filter === 'all' && (
             <button
               onClick={() => onNavigate('composer')}
-              style={{ background: '#E60306', color: '#FFF', fontSize: 13, fontWeight: 700, padding: '9px 18px', borderRadius: 9, border: 'none', cursor: 'pointer' }}
+              style={{ background: '#E63329', color: '#FFF', fontSize: 13, fontWeight: 700, padding: '9px 18px', borderRadius: 9, border: 'none', cursor: 'pointer' }}
             >
               + Create a Post
             </button>

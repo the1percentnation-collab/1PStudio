@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 
 const PILLAR_COLORS = {
-  'Self-Sabotage & Limiting Beliefs': '#E60306',
+  'Self-Sabotage & Limiting Beliefs': '#E63329',
   'Accountability & Execution': '#FF6B00',
   'Identity & Mindset Shift': '#9B59B6',
   'Leadership & Purpose': '#2980B9',
@@ -198,7 +198,7 @@ function LibraryCard({ item, onDelete }) {
               <Field label="HASHTAGS" value={content.hashtags} muted />
               {content.hook_score_reason && (
                 <div style={{ fontSize: 11, color: '#555', lineHeight: 1.5, marginTop: 4, marginBottom: 12 }}>
-                  <span style={{ color: '#E60306' }}>Tip: </span>{content.hook_score_reason}
+                  <span style={{ color: '#E63329' }}>Tip: </span>{content.hook_score_reason}
                 </div>
               )}
             </>

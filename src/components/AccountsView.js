@@ -38,7 +38,7 @@ export default function AccountsView() {
         <a href={AYRSHARE_DASHBOARD} target="_blank" rel="noreferrer">
           <button style={{
             marginTop: 14,
-            background: '#E60306',
+            background: '#E63329',
             color: '#FFF',
             fontSize: 14,
             fontWeight: 700,

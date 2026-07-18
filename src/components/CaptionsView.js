@@ -83,7 +83,7 @@ export default function CaptionsView() {
               disabled={busy}
               style={{
                 background: active ? 'rgba(230,3,6,0.12)' : '#111',
-                border: `1px solid ${active ? '#E60306' : '#2A2A2A'}`,
+                border: `1px solid ${active ? '#E63329' : '#2A2A2A'}`,
                 borderRadius: 10,
                 padding: '10px 14px',
                 textAlign: 'left',
@@ -91,7 +91,7 @@ export default function CaptionsView() {
                 opacity: busy ? 0.6 : 1,
               }}
             >
-              <div style={{ fontSize: 13, fontWeight: 700, color: active ? '#E60306' : '#DDD' }}>{s.label}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: active ? '#E63329' : '#DDD' }}>{s.label}</div>
               <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>{s.desc}</div>
             </button>
           );
@@ -142,7 +142,7 @@ export default function CaptionsView() {
           />
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <a href={result.videoUrl} target="_blank" rel="noreferrer" download>
-              <button style={{ background: '#E60306', color: '#FFF', fontSize: 13, fontWeight: 700, padding: '9px 18px', borderRadius: 9 }}>
+              <button style={{ background: '#E63329', color: '#FFF', fontSize: 13, fontWeight: 700, padding: '9px 18px', borderRadius: 9 }}>
                 Download ↓
               </button>
             </a>

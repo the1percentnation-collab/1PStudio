@@ -1,4 +1,24 @@
 import React from 'react';
+import { colors as c, fonts as f } from '../theme';
+
+// 1P monogram lockup (matches the1pnation.com brand mark).
+function Logo({ compact = false }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ width: 34, height: 34, borderRadius: 9, background: '#000', border: `1px solid ${c.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: f.display, fontSize: 18, color: '#fff', letterSpacing: '-0.02em', flexShrink: 0 }}>
+        1P
+      </div>
+      {!compact && (
+        <div style={{ lineHeight: 1 }}>
+          <div style={{ fontFamily: f.mono, fontSize: 8.5, letterSpacing: '0.2em', color: c.textDim }}>THE ONE PERCENT</div>
+          <div style={{ fontFamily: f.display, fontSize: 20, letterSpacing: '0.02em', color: '#fff', marginTop: 3 }}>
+            STUDIO
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const ICONS = {
   dashboard: (
@@ -134,7 +154,7 @@ export default function Sidebar({ active, onNavigate, counts = {}, isMobile = fa
                 justifyContent: 'center',
                 gap: 4,
                 background: 'transparent',
-                color: isActive ? '#E60306' : '#777',
+                color: isActive ? '#E63329' : '#777',
                 fontSize: 10,
                 fontWeight: 600,
                 letterSpacing: '0.02em',
@@ -156,9 +176,9 @@ export default function Sidebar({ active, onNavigate, counts = {}, isMobile = fa
         top: 0,
         left: 0,
         bottom: 0,
-        width: 220,
-        background: '#0D0D0D',
-        borderRight: '1px solid #1A1A1A',
+        width: 232,
+        background: c.bg2,
+        borderRight: `1px solid ${c.border}`,
         display: 'flex',
         flexDirection: 'column',
         padding: '0 0 16px',
@@ -166,24 +186,12 @@ export default function Sidebar({ active, onNavigate, counts = {}, isMobile = fa
       }}
     >
       {/* LOGO */}
-      <div
-        style={{
-          height: 64,
-          display: 'flex',
-          alignItems: 'center',
-          padding: '0 22px',
-          borderBottom: '1px solid #1A1A1A',
-          fontFamily: "'Bebas Neue', sans-serif",
-          fontSize: 26,
-          letterSpacing: '0.04em',
-        }}
-      >
-        <span style={{ color: '#E60306' }}>1P</span>
-        <span style={{ color: '#FFFFFF', marginLeft: 6 }}>STUDIO</span>
+      <div style={{ height: 72, display: 'flex', alignItems: 'center', padding: '0 20px', borderBottom: `1px solid ${c.border}` }}>
+        <Logo />
       </div>
 
       {/* NAV */}
-      <nav style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '14px 12px', flex: 1 }}>
+      <nav style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '16px 12px', flex: 1 }}>
         {NAV.map(({ id, label, icon }) => {
           const isActive = active === id;
           const count = counts[id];
@@ -196,23 +204,25 @@ export default function Sidebar({ active, onNavigate, counts = {}, isMobile = fa
                 alignItems: 'center',
                 gap: 12,
                 padding: '11px 14px',
-                borderRadius: 10,
-                background: isActive ? 'rgba(230,3,6,0.10)' : 'transparent',
-                color: isActive ? '#FFFFFF' : '#777',
+                borderRadius: 11,
+                background: isActive ? c.redGlow : 'transparent',
+                border: `1px solid ${isActive ? 'rgba(230,51,41,0.25)' : 'transparent'}`,
+                color: isActive ? '#FFFFFF' : c.textDim,
+                fontFamily: f.body,
                 fontSize: 14,
                 fontWeight: 600,
                 letterSpacing: '0.01em',
                 textAlign: 'left',
                 position: 'relative',
-                transition: 'background 0.15s, color 0.15s',
+                transition: 'background 0.15s, color 0.15s, border-color 0.15s',
               }}
-              onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.color = '#FFF'; }}
-              onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.color = '#777'; }}
+              onMouseEnter={(e) => { if (!isActive) { e.currentTarget.style.color = '#FFF'; e.currentTarget.style.background = c.surface; } }}
+              onMouseLeave={(e) => { if (!isActive) { e.currentTarget.style.color = c.textDim; e.currentTarget.style.background = 'transparent'; } }}
             >
               {isActive && (
-                <span style={{ position: 'absolute', left: 0, top: 8, bottom: 8, width: 3, background: '#E60306', borderRadius: 3 }} />
+                <span style={{ position: 'absolute', left: -1, top: 8, bottom: 8, width: 3, background: c.red, borderRadius: 3, boxShadow: `0 0 12px ${c.red}` }} />
               )}
-              <span style={{ color: isActive ? '#E60306' : 'inherit', display: 'flex' }}>
+              <span style={{ color: isActive ? c.red : 'inherit', display: 'flex' }}>
                 <Icon name={icon} />
               </span>
               <span style={{ flex: 1 }}>{label}</span>
@@ -220,8 +230,9 @@ export default function Sidebar({ active, onNavigate, counts = {}, isMobile = fa
                 <span style={{
                   fontSize: 11,
                   fontWeight: 700,
-                  color: isActive ? '#E60306' : '#555',
-                  background: isActive ? 'rgba(230,3,6,0.15)' : '#1A1A1A',
+                  fontFamily: f.mono,
+                  color: isActive ? c.red : c.textFaint,
+                  background: isActive ? 'rgba(230,51,41,0.15)' : c.surface,
                   borderRadius: 10,
                   padding: '1px 8px',
                 }}>
@@ -234,7 +245,7 @@ export default function Sidebar({ active, onNavigate, counts = {}, isMobile = fa
       </nav>
 
       {/* FOOTER */}
-      <div style={{ padding: '0 22px', fontSize: 11, color: '#333', lineHeight: 1.5 }}>
+      <div style={{ padding: '0 20px', fontFamily: f.mono, fontSize: 9.5, letterSpacing: '0.14em', color: c.textGhost, lineHeight: 1.7, textTransform: 'uppercase' }}>
         The One Percent Nation<br />Content Studio
       </div>
     </aside>
