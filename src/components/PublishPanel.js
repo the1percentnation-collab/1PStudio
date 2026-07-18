@@ -124,7 +124,7 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
       // it. Treat those as "pending" (check Posts) instead of a hard failure;
       // real validation errors (4xx) still surface as errors.
       const m = err?.message || 'Publish failed.';
-      const likelyTimedOut = /\b(502|503|504)\b/.test(m) || /reach|timeout|timed out|network|failed to fetch/i.test(m);
+      const likelyTimedOut = /\b(502|503|504)\b/.test(m) || /reach|timeout|timed out|network|failed to fetch|load failed/i.test(m);
       if (likelyTimedOut) {
         setStatus({
           type: 'pending',
@@ -328,7 +328,7 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
           </div>
           <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>
             {phase === 'rendering'
-              ? 'Burning in on-screen text & captions…'
+              ? 'Burning in on-screen text & captions… (can take a few minutes — keep this tab open)'
               : phase === 'publishing' || uploadPct >= 100
                 ? 'Publishing to platforms…'
                 : `Uploading ${isPhoto ? 'photo' : 'video'}… ${uploadPct}%`}

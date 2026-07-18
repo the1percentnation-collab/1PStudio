@@ -945,11 +945,15 @@ export const renderOverlays = onRequest(
       return;
     }
 
-    const { videoUrl, spec } = (req.body ?? {}) as { videoUrl?: string; spec?: OverlaySpec };
+    const { videoUrl, spec, jobId } = (req.body ?? {}) as { videoUrl?: string; spec?: OverlaySpec; jobId?: string };
     if (!videoUrl || !/^https?:\/\//.test(videoUrl)) {
       res.status(400).json({ error: "A valid video URL is required." });
       return;
     }
+    // A client-supplied job id fixes the output path (rendered/<jobId>.mp4) so
+    // the browser can poll Storage for the result — hosting caps this response
+    // at 60s, but the render keeps running and lands at a known location.
+    const safeJobId = typeof jobId === "string" && /^[A-Za-z0-9-]{8,64}$/.test(jobId) ? jobId : null;
 
     const hasText = (spec?.texts ?? []).some((t) => t.text && t.text.trim());
     const hasCaptions = Boolean(spec?.captions?.enabled && (spec?.captions?.lines ?? []).length);
@@ -996,7 +1000,7 @@ export const renderOverlays = onRequest(
 
       const bucket = getStorage().bucket();
       const token = randomUUID();
-      const objectPath = `rendered/${Date.now()}-${randomUUID()}.mp4`;
+      const objectPath = safeJobId ? `rendered/${safeJobId}.mp4` : `rendered/${Date.now()}-${randomUUID()}.mp4`;
       await bucket.upload(outputPath, {
         destination: objectPath,
         resumable: false,
