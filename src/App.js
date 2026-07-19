@@ -182,6 +182,33 @@ export default function App() {
     openLibEditor(entry, file, []);
   }, [library, openLibEditor]);
 
+  // Loads the postable media for a Library item without any user prompt:
+  // videos come back out of IndexedDB; photos are rebuilt from the stored
+  // hookFrame JPEG. Returns { file, words } or null when nothing is stored.
+  const loadLibraryMedia = useCallback(async (item) => {
+    if (item.mediaType === 'photo') {
+      const b64 = item.frames?.hookFrame;
+      if (!b64) return null;
+      try {
+        const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
+        const name = (item.filename || 'photo').replace(/\.[^.]+$/, '') + '.jpg';
+        return { file: new File([bytes], name, { type: 'image/jpeg' }), words: [] };
+      } catch {
+        return null;
+      }
+    }
+    try {
+      const rec = await getVideo(item.id);
+      if (rec?.blob) {
+        return {
+          file: new File([rec.blob], item.filename || 'video.mp4', { type: rec.blob.type || 'video/mp4' }),
+          words: rec.words || [],
+        };
+      }
+    } catch { /* fall through */ }
+    return null;
+  }, []);
+
   const handleCloseLibEditor = useCallback(() => {
     setLibEditing((cur) => {
       if (cur?.videoUrl) URL.revokeObjectURL(cur.videoUrl);
@@ -334,7 +361,16 @@ export default function App() {
       return <Analytics library={library} posts={posts} />;
     }
     if (view === 'library') {
-      return <LibraryView library={library} onDelete={handleLibraryDelete} onEdit={handleLibraryEdit} loadingId={libLoadingId} />;
+      return (
+        <LibraryView
+          library={library}
+          onDelete={handleLibraryDelete}
+          onEdit={handleLibraryEdit}
+          loadingId={libLoadingId}
+          onLoadMedia={loadLibraryMedia}
+          onPublished={handlePublished}
+        />
+      );
     }
     if (view === 'accounts') {
       return <AccountsView />;
