@@ -99,10 +99,8 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
         ? `Scheduled for ${new Date(scheduleDate).toLocaleString()} on ${selected.length} platform${selected.length !== 1 ? 's' : ''}.`
         : `Posted to ${selected.length} platform${selected.length !== 1 ? 's' : ''}.`;
       setStatus({
-        type: result?.renderWarning ? 'pending' : 'ok',
-        message: result?.renderWarning
-          ? `${base} Note: on-screen text/captions couldn’t be burned in this time (${result.renderWarning}), so the original video was posted.`
-          : willBurn ? `${base} On-screen text & captions burned in.` : base,
+        type: 'ok',
+        message: willBurn ? `${base} On-screen text & captions burned in.` : base,
       });
       if (onPublished) {
         onPublished({
@@ -124,7 +122,10 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
       // it. Treat those as "pending" (check Posts) instead of a hard failure;
       // real validation errors (4xx) still surface as errors.
       const m = err?.message || 'Publish failed.';
-      const likelyTimedOut = /\b(502|503|504)\b/.test(m) || /reach|timeout|timed out|network|failed to fetch|load failed/i.test(m);
+      // A failed burn-in means nothing was posted — always a real error, even
+      // though its message can look like a network timeout to the regex below.
+      const likelyTimedOut = !err?.renderFailed &&
+        (/\b(502|503|504)\b/.test(m) || /reach|timeout|timed out|network|failed to fetch|load failed/i.test(m));
       if (likelyTimedOut) {
         setStatus({
           type: 'pending',

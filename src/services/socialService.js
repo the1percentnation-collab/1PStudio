@@ -7,7 +7,7 @@
 //
 // platforms is an array of: 'tiktok' | 'instagram' | 'youtube' | 'facebook' | 'x' | 'linkedin'
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { storage, ensureAuth } from './firebase';
+import { storage, ensureAuth, FUNCTIONS_ORIGIN } from './firebase';
 
 export const SOCIAL_PLATFORMS = [
   { id: 'tiktok', label: 'TikTok' },
@@ -69,35 +69,54 @@ export async function getConnectedAccounts() {
 // Server-side burns the editor's on-screen text + captions (the overlay spec)
 // into the video with ffmpeg and returns a new download URL to post.
 //
-// Hosting caps the HTTP response at 60s but the render keeps running server-
-// side, so we pass a job id that fixes the output path (rendered/<jobId>.mp4)
-// and, if the response dies or 5xxs, poll Storage until the file appears.
+// The render is requested on the function's OWN URL, not the Hosting /api
+// proxy: Hosting kills proxied responses at 60s, and once the request drops
+// Cloud Run throttles the instance's CPU to near-zero — the encode stalls and
+// the output never appears (the old "post without captions" bug). The direct
+// request stays open (CPU allocated) for the full 540s function timeout.
+//
+// The Hosting route + Storage polling remain as fallbacks for when the direct
+// URL is unreachable or a response dies mid-flight: the job id fixes the
+// output path (rendered/<jobId>.mp4) so the browser can find the result.
+async function requestRender(endpoint, body) {
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) return { ok: true, data }; // { status, videoUrl, rendered }
+    return { ok: false, status: response.status, message: data?.error || `Render failed (${response.status})` };
+  } catch {
+    // Network-level death (Safari "Load failed") — no response at all.
+    return { ok: false };
+  }
+}
+
 export async function renderOverlays(videoUrl, spec) {
   await ensureAuth();
   const jobId =
     (typeof crypto !== 'undefined' && crypto.randomUUID && crypto.randomUUID()) ||
     `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const body = JSON.stringify({ videoUrl, spec, jobId });
 
-  let hardError = null;
-  try {
-    const response = await fetch('/api/render', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ videoUrl, spec, jobId }),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (response.ok) return data; // { status, videoUrl, rendered }
-    if (response.status < 500) {
-      // Real validation/render error — polling won't help.
-      hardError = new Error(data?.error || `Render failed (${response.status})`);
-    }
-  } catch {
-    // Network-level death (Safari "Load failed") — fall through to polling.
-  }
-  if (hardError) throw hardError;
+  const direct = await requestRender(`${FUNCTIONS_ORIGIN}/renderOverlays`, body);
+  if (direct.ok) return direct.data;
+  // Any real response from the function itself is the render's true outcome —
+  // retrying through Hosting would just re-fail after another long wait.
+  if (direct.message) throw new Error(direct.message);
 
+  const viaHosting = await requestRender('/api/render', body);
+  if (viaHosting.ok) return viaHosting.data;
+  // Real validation/render error (4xx) — polling won't help. A 5xx here is
+  // Hosting's 60s cutoff, not the render's outcome, so keep waiting.
+  if (viaHosting.message && viaHosting.status < 500) throw new Error(viaHosting.message);
+
+  // A response died mid-flight but the render may still be running — poll for
+  // the output. Deadline exceeds the function's 540s timeout.
   const outRef = ref(storage, `rendered/${jobId}.mp4`);
-  const deadline = Date.now() + 8 * 60 * 1000;
+  const deadline = Date.now() + 10 * 60 * 1000;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 5000));
     try {
@@ -107,7 +126,7 @@ export async function renderOverlays(videoUrl, spec) {
       // not ready yet — keep waiting
     }
   }
-  throw new Error('Caption render timed out — the original video will be posted instead.');
+  throw new Error('The caption render never finished.');
 }
 
 export async function publishToSocial(mediaFile, { post, title, platforms, scheduleDate, onProgress, onPhase, spec, burnIn }) {
@@ -125,17 +144,32 @@ export async function publishToSocial(mediaFile, { post, title, platforms, sched
   let mediaUrl = await uploadVideo(mediaFile, onProgress);
 
   // Burn the on-screen text + captions into the video before posting so the
-  // published clip carries them. If the render fails (e.g. very long video hits
-  // the hosting timeout), fall back to posting the original and warn.
-  let renderWarning = null;
+  // published clip carries them. Burn-in was explicitly requested, so a failed
+  // render STOPS the publish — a bare video that's already live on five
+  // platforms can't be unposted, but a failed attempt can simply be retried.
   if (burnIn && spec && mediaType === 'video') {
     onPhase?.('rendering');
+    let rendered = null;
+    let renderError = null;
     try {
-      const rendered = await renderOverlays(mediaUrl, spec);
-      if (rendered?.videoUrl) mediaUrl = rendered.videoUrl;
+      rendered = await renderOverlays(mediaUrl, spec);
     } catch (err) {
-      renderWarning = err?.message || 'Could not render captions.';
+      renderError = err?.message || 'render failed';
     }
+    // rendered:false from the server means it found nothing to draw even
+    // though the caller sent burnable text — treat that as a failure too.
+    if (!renderError && (!rendered?.videoUrl || rendered.rendered === false)) {
+      renderError = 'the server returned the video without the text burned in';
+    }
+    if (renderError) {
+      const e = new Error(
+        `Couldn't burn the on-screen text & captions into the video (${renderError}). ` +
+          'Nothing was posted. Try again, or uncheck "Burn on-screen text & captions" to post the original video.'
+      );
+      e.renderFailed = true;
+      throw e;
+    }
+    mediaUrl = rendered.videoUrl;
   }
 
   onPhase?.('publishing');
@@ -149,5 +183,5 @@ export async function publishToSocial(mediaFile, { post, title, platforms, sched
   if (!response.ok) {
     throw new Error(data?.error || `Publish failed (${response.status})`);
   }
-  return { ...data, renderWarning };
+  return data;
 }

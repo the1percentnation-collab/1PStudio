@@ -26,6 +26,9 @@ try { FFPROBE = require("@ffprobe-installer/ffprobe").path; } catch { /* PATH fa
 
 const SITE = process.env.SMOKE_BASE_URL || "https://onepstudio-9a3ef.web.app";
 const BUCKET = process.env.SMOKE_BUCKET || "onepstudio-9a3ef.firebasestorage.app";
+// The app calls the function's own URL (Hosting kills proxied responses at
+// 60s and Cloud Run then throttles CPU, stalling the render) — test that path.
+const FUNCTIONS_ORIGIN = process.env.SMOKE_FUNCTIONS_ORIGIN || "https://us-central1-onepstudio-9a3ef.cloudfunctions.net";
 
 const ok = (m) => console.log(`✓ ${m}`);
 const fail = (m) => {
@@ -98,11 +101,21 @@ async function main() {
     },
   };
 
-  res = await fetch(`${SITE}/api/render`, {
+  res = await fetch(`${FUNCTIONS_ORIGIN}/renderOverlays`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ videoUrl: srcUrl, spec, jobId }),
   }).catch(() => null);
+  if (res && !res.ok) fail(`direct render URL failed (${res.status}) — the app depends on this path`);
+  if (res) ok("direct function URL reachable");
+  if (!res) {
+    // Direct URL unreachable — exercise the app's Hosting fallback instead.
+    res = await fetch(`${SITE}/api/render`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ videoUrl: srcUrl, spec, jobId }),
+    }).catch(() => null);
+  }
 
   let downloaded = false;
   if (res && res.ok) {
