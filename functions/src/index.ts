@@ -674,7 +674,7 @@ function buildAss(words: DGWord[], width: number, height: number, style: Caption
 ScriptType: v4.00+
 PlayResX: ${width}
 PlayResY: ${height}
-WrapStyle: 2
+WrapStyle: 0
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
@@ -699,9 +699,10 @@ async function probeDimensions(file: string): Promise<{ width: number; height: n
     const { stdout } = await run(ffprobePath, [
       "-v", "quiet", "-print_format", "json", "-show_streams", file,
     ]);
-    const data = JSON.parse(stdout) as { streams?: { codec_type?: string; width?: number; height?: number }[] };
+    const data = JSON.parse(stdout) as { streams?: ProbeStream[] };
     const v = (data.streams ?? []).find((s) => s.codec_type === "video");
-    if (v?.width && v?.height) return { width: v.width, height: v.height };
+    const dims = v && displayDimensions(v);
+    if (dims) return dims;
   } catch {
     /* fall through */
   }
@@ -883,8 +884,11 @@ function buildOverlayAss(
     const bold = (el.weight ?? 400) >= 600 ? 1 : 0;
     const tags = `\\an5\\pos(${cx},${cy})\\fs${fs}\\c${assColor(el.color ?? "#FFFFFF")}` +
       `\\3c${assColor(el.outline?.color ?? "#000000")}\\bord${bord}\\shad0\\b${bold}`;
-    // Wrap to ~90% of frame width; Arial glyphs average ~0.52·fontsize wide.
-    const maxChars = Math.max(6, Math.floor((0.9 * width) / (fs * 0.52)));
+    // Wrap to ~90% of frame width. 0.62·fontsize approximates the average
+    // glyph advance for bold ALL-CAPS hooks (lowercase averages ~0.52); with
+    // WrapStyle 0, libass re-wraps with real glyph metrics if a line is still
+    // too wide for the frame.
+    const maxChars = Math.max(6, Math.floor((0.9 * width) / (fs * 0.62)));
     events.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Txt,,0,0,0,,{${tags}}${wrapAss(el.text, maxChars)}`);
   }
 
@@ -900,7 +904,7 @@ function buildOverlayAss(
       const start = Math.max(0, (line.start ?? 0) - clipStart);
       const end = Math.max(start, (line.end ?? start) - clipStart);
       const tags = `\\an5\\pos(${cx},${cy})\\fs${fs}\\c&H00FFFFFF&\\3c&H00000000&\\bord${bord}\\shad0\\b1`;
-      const maxChars = Math.max(6, Math.floor((0.9 * width) / (fs * 0.52)));
+      const maxChars = Math.max(6, Math.floor((0.9 * width) / (fs * 0.62)));
       events.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Cap,,0,0,0,,{${tags}}${wrapAss(text, maxChars)}`);
     }
   }
@@ -911,7 +915,7 @@ function buildOverlayAss(
 ScriptType: v4.00+
 PlayResX: ${width}
 PlayResY: ${height}
-WrapStyle: 2
+WrapStyle: 0
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
@@ -926,18 +930,43 @@ ${events.join("\n")}
   return { ass, count: events.length };
 }
 
+interface ProbeStream {
+  codec_type?: string;
+  width?: number;
+  height?: number;
+  duration?: string;
+  tags?: { rotate?: string };
+  side_data_list?: { rotation?: number }[];
+}
+
+// Phone videos are stored sideways (e.g. 1920x1080) with a 90°/270° rotation
+// flag; ffmpeg autorotates the frames before the subtitles filter runs, so
+// the burn canvas is the DISPLAY orientation. Using the stored dimensions
+// builds the overlay for a landscape frame that gets drawn on a portrait one —
+// centered text bleeds off both edges. Swap when the rotation is sideways.
+function displayDimensions(v: ProbeStream): { width: number; height: number } | null {
+  if (!v.width || !v.height) return null;
+  const side = (v.side_data_list ?? []).find((s) => typeof s.rotation === "number");
+  const raw = side?.rotation ?? Number(v.tags?.rotate ?? 0);
+  const rot = ((Math.round((Number.isFinite(raw) ? raw : 0) / 90) * 90) % 360 + 360) % 360;
+  return rot === 90 || rot === 270
+    ? { width: v.height, height: v.width }
+    : { width: v.width, height: v.height };
+}
+
 async function probeMeta(file: string): Promise<{ width: number; height: number; duration: number }> {
   try {
     const { stdout } = await run(ffprobePath, [
       "-v", "quiet", "-print_format", "json", "-show_streams", "-show_format", file,
     ]);
     const data = JSON.parse(stdout) as {
-      streams?: { codec_type?: string; width?: number; height?: number; duration?: string }[];
+      streams?: ProbeStream[];
       format?: { duration?: string };
     };
     const v = (data.streams ?? []).find((s) => s.codec_type === "video");
     const duration = Number(data.format?.duration ?? v?.duration ?? 0) || 0;
-    if (v?.width && v?.height) return { width: v.width, height: v.height, duration };
+    const dims = v && displayDimensions(v);
+    if (dims) return { ...dims, duration };
   } catch {
     /* fall through */
   }
