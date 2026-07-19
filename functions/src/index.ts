@@ -583,6 +583,13 @@ export const postHistory = onRequest(
 const ffmpegPath: string = require("@ffmpeg-installer/ffmpeg").path;
 const ffprobePath: string = require("@ffprobe-installer/ffprobe").path;
 
+// Fonts bundled with the deploy (functions/fonts). libass exits 0 and draws
+// NOTHING when it can't find a usable font, so subtitle burns must never
+// depend on the runtime image shipping fonts. __dirname is functions/lib at
+// runtime (compiled output), so the fonts dir is one level up.
+const fontsDir = path.join(__dirname, "..", "fonts");
+const ASS_FONT = "Liberation Sans";
+
 interface DGWord {
   word: string;
   start: number;
@@ -672,7 +679,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,${fontSize},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,1,0,0,0,100,100,0,0,1,${preset.outline},1,2,60,60,${marginV},1
+Style: Default,${ASS_FONT},${fontSize},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,1,0,0,0,100,100,0,0,1,${preset.outline},1,2,60,60,${marginV},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -706,6 +713,10 @@ export const captionVideo = onRequest(
     cors: true,
     timeoutSeconds: 540,
     memory: "2GiB",
+    // ffmpeg is CPU-bound: 2 vCPUs roughly halve the encode, and one render
+    // per instance keeps parallel renders from starving each other.
+    cpu: 2,
+    concurrency: 1,
   },
   async (req, res) => {
     if (req.method !== "POST") {
@@ -764,7 +775,7 @@ export const captionVideo = onRequest(
       await run(ffmpegPath, [
         "-y",
         "-i", inputPath,
-        "-vf", `subtitles=${assPath}`,
+        "-vf", `subtitles=${assPath}:fontsdir=${fontsDir}`,
         "-c:v", "libx264",
         "-preset", "veryfast",
         "-pix_fmt", "yuv420p",
@@ -895,7 +906,7 @@ function buildOverlayAss(
   }
 
   const styleLine = (name: string) =>
-    `Style: ${name},Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,3,0,5,40,40,40,1`;
+    `Style: ${name},${ASS_FONT},48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,3,0,5,40,40,40,1`;
   const ass = `[Script Info]
 ScriptType: v4.00+
 PlayResX: ${width}
@@ -938,6 +949,10 @@ export const renderOverlays = onRequest(
     cors: true,
     timeoutSeconds: 540,
     memory: "2GiB",
+    // ffmpeg is CPU-bound: 2 vCPUs roughly halve the encode, and one render
+    // per instance keeps parallel renders from starving each other.
+    cpu: 2,
+    concurrency: 1,
   },
   async (req, res) => {
     if (req.method !== "POST") {
@@ -987,7 +1002,7 @@ export const renderOverlays = onRequest(
       if (clip && clipDur > 0) args.push("-ss", String(clipStart), "-t", String(clipDur));
       args.push(
         "-i", inputPath,
-        "-vf", `subtitles=${assPath}`,
+        "-vf", `subtitles=${assPath}:fontsdir=${fontsDir}`,
         "-c:v", "libx264",
         "-preset", "veryfast",
         "-pix_fmt", "yuv420p",

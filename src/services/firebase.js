@@ -19,6 +19,13 @@ const app = initializeApp(firebaseConfig);
 export const storage = getStorage(app);
 const auth = getAuth(app);
 
+// Direct origin for the Cloud Functions, bypassing the Hosting /api proxy.
+// Hosting kills proxied responses at 60s — too short for ffmpeg renders — and
+// once the request drops, Cloud Run throttles the instance's CPU to near-zero,
+// stalling the render. Direct requests stay open for the function's full
+// timeout with CPU allocated the whole time.
+export const FUNCTIONS_ORIGIN = `https://us-central1-${firebaseConfig.projectId}.cloudfunctions.net`;
+
 // Storage rules require an authenticated request. Anonymous auth satisfies
 // that without any login UI. (Enable Anonymous sign-in in the Firebase
 // console: Authentication -> Sign-in method -> Anonymous.)

@@ -1,6 +1,7 @@
 // Uploads a video, then asks the captionVideo function to auto-transcribe it
 // (Deepgram) and burn word-synced captions into the video with ffmpeg.
 import { uploadVideo } from './socialService';
+import { FUNCTIONS_ORIGIN } from './firebase';
 
 export const CAPTION_STYLES = [
   { id: 'bold', label: 'Bold', desc: 'Big all-caps, thick outline' },
@@ -12,12 +13,25 @@ export async function renderCaptions(videoFile, style, onProgress) {
   if (!videoFile) throw new Error('Choose a video to caption.');
 
   const mediaUrl = await uploadVideo(videoFile, onProgress);
+  const body = JSON.stringify({ mediaUrl, style });
 
-  const response = await fetch('/api/caption', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mediaUrl, style }),
-  });
+  // Call the function's own URL: the Hosting /api proxy kills responses at
+  // 60s, far too short for transcribe + ffmpeg on a real video. Fall back to
+  // the Hosting route if the direct URL is unreachable.
+  let response;
+  try {
+    response = await fetch(`${FUNCTIONS_ORIGIN}/captionVideo`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+  } catch {
+    response = await fetch('/api/caption', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+  }
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
