@@ -173,11 +173,25 @@ export async function publishToSocial(mediaFile, { post, title, platforms, sched
   }
 
   onPhase?.('publishing');
-  const response = await fetch('/api/publish', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mediaUrl, post, title, platforms, scheduleDate, mediaType }),
-  });
+  const publishBody = JSON.stringify({ mediaUrl, post, title, platforms, scheduleDate, mediaType });
+  // Direct function URL first: publishPost allows itself 120s (Zernio can take
+  // over a minute to accept a large video), but the Hosting /api proxy kills
+  // the response at 60s — that's the "sent to Zernio, but confirmation timed
+  // out" limbo state. The direct request gets a real confirmation.
+  let response;
+  try {
+    response = await fetch(`${FUNCTIONS_ORIGIN}/publishPost`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: publishBody,
+    });
+  } catch {
+    response = await fetch('/api/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: publishBody,
+    });
+  }
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
