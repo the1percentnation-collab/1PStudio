@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import PublishPanel from './PublishPanel';
 
 const PILLAR_COLORS = {
   'Self-Sabotage & Limiting Beliefs': '#E63329',
@@ -81,10 +82,23 @@ function TitleRow({ title, index }) {
   );
 }
 
-function LibraryCard({ item, onDelete, onEdit, loading }) {
+function LibraryCard({ item, onDelete, onEdit, loading, onLoadMedia, onPublished }) {
   const [expanded, setExpanded] = useState(false);
   const { filename, frames, content, transcript, error, dateAdded, mediaType, hasVideo } = item;
   const isPhoto = mediaType === 'photo';
+
+  // Postable media loads when the card is expanded: undefined = loading,
+  // null = nothing stored on this device, { file, words } = ready to post.
+  // hasVideo is a dep so re-linking via ✎ Edit unlocks posting immediately.
+  const [media, setMedia] = useState(undefined);
+  useEffect(() => {
+    if (!expanded || !onLoadMedia) return;
+    let alive = true;
+    setMedia(undefined);
+    onLoadMedia(item).then((m) => { if (alive) setMedia(m); }).catch(() => { if (alive) setMedia(null); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded, item.id, hasVideo, onLoadMedia]);
   const pillarColor = content ? (PILLAR_COLORS[content.content_pillar] || '#888') : '#888';
 
   return (
@@ -228,6 +242,27 @@ function LibraryCard({ item, onDelete, onEdit, loading }) {
             <div style={{ fontSize: 12, color: '#FF4444', marginBottom: 12 }}>Error: {error}</div>
           ) : null}
 
+          {/* POST TO SOCIAL — same publisher the Composer uses */}
+          {content && !error && media?.file && (
+            <div style={{ marginBottom: 12 }}>
+              <PublishPanel
+                videoFile={media.file}
+                content={content}
+                onPublished={onPublished}
+                filename={filename}
+                thumbnail={frames?.hookFrame}
+                mediaType={mediaType}
+                overlaySpec={item.overlaySpec}
+                words={media.words}
+              />
+            </div>
+          )}
+          {content && !error && media === null && !isPhoto && (
+            <div style={{ fontSize: 12, color: '#B8933B', background: '#FFC10711', border: '1px solid #FFC10733', borderRadius: 8, padding: '8px 10px', marginBottom: 12, lineHeight: 1.5 }}>
+              To post this video, tap <strong>✎ Re-link</strong> above once to attach the video file from your device — posting unlocks right after.
+            </div>
+          )}
+
           <button
             onClick={() => onDelete(item.id)}
             style={{
@@ -251,7 +286,7 @@ function LibraryCard({ item, onDelete, onEdit, loading }) {
   );
 }
 
-export default function LibraryView({ library, onDelete, onEdit, loadingId }) {
+export default function LibraryView({ library, onDelete, onEdit, loadingId, onLoadMedia, onPublished }) {
   if (library.length === 0) {
     return (
       <div style={{ textAlign: 'center', padding: '80px 24px', color: '#333' }}>
@@ -283,7 +318,15 @@ export default function LibraryView({ library, onDelete, onEdit, loadingId }) {
         CONTENT LIBRARY — {library.length} post{library.length !== 1 ? 's' : ''}
       </div>
       {library.map((item) => (
-        <LibraryCard key={item.id} item={item} onDelete={onDelete} onEdit={onEdit} loading={loadingId === item.id} />
+        <LibraryCard
+          key={item.id}
+          item={item}
+          onDelete={onDelete}
+          onEdit={onEdit}
+          loading={loadingId === item.id}
+          onLoadMedia={onLoadMedia}
+          onPublished={onPublished}
+        />
       ))}
     </div>
   );
