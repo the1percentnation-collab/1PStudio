@@ -694,21 +694,6 @@ async function downloadTo(url: string, dest: string): Promise<void> {
   await fs.writeFile(dest, buf);
 }
 
-async function probeDimensions(file: string): Promise<{ width: number; height: number }> {
-  try {
-    const { stdout } = await run(ffprobePath, [
-      "-v", "quiet", "-print_format", "json", "-show_streams", file,
-    ]);
-    const data = JSON.parse(stdout) as { streams?: ProbeStream[] };
-    const v = (data.streams ?? []).find((s) => s.codec_type === "video");
-    const dims = v && displayDimensions(v);
-    if (dims) return dims;
-  } catch {
-    /* fall through */
-  }
-  return { width: 1080, height: 1920 };
-}
-
 export const captionVideo = onRequest(
   {
     cors: true,
@@ -769,13 +754,19 @@ export const captionVideo = onRequest(
 
       // 2) Download source + probe dimensions + build subtitles.
       await downloadTo(mediaUrl, inputPath);
-      const { width, height } = await probeDimensions(inputPath);
+      const meta = await probeMeta(inputPath);
+      if (meta.undecodableAudioOnly) {
+        res.status(422).json({ error: UNDECODABLE_AUDIO_ERROR });
+        return;
+      }
+      const { width, height } = meta;
       await fs.writeFile(assPath, buildAss(words, width, height, style));
 
       // 3) Burn captions in.
       await run(ffmpegPath, [
         "-y",
         "-i", inputPath,
+        ...mapArgs(meta),
         "-vf", `subtitles=${assPath}:fontsdir=${fontsDir}`,
         "-c:v", "libx264",
         "-preset", "veryfast",
@@ -931,13 +922,26 @@ ${events.join("\n")}
 }
 
 interface ProbeStream {
+  index?: number;
   codec_type?: string;
+  codec_name?: string;
   width?: number;
   height?: number;
   duration?: string;
   tags?: { rotate?: string };
   side_data_list?: { rotation?: number }[];
 }
+
+// Audio codecs the bundled ffmpeg can decode. Newer iPhones add a Spatial
+// Audio track (Apple's APAC codec) plus mebx metadata streams; ffmpeg's
+// default stream selection can pick the undecodable track and the whole
+// render dies with "Decoder (codec none) not found". Streams are therefore
+// mapped explicitly, and only audio from this list is eligible.
+const DECODABLE_AUDIO = new Set([
+  "aac", "mp3", "mp2", "alac", "opus", "vorbis", "flac", "ac3", "eac3",
+  "amr_nb", "amr_wb", "wmav2", "pcm_s16le", "pcm_s16be", "pcm_s24le",
+  "pcm_f32le", "pcm_u8", "pcm_mulaw", "pcm_alaw",
+]);
 
 // Phone videos are stored sideways (e.g. 1920x1080) with a 90°/270° rotation
 // flag; ffmpeg autorotates the frames before the subtitles filter runs, so
@@ -954,7 +958,16 @@ function displayDimensions(v: ProbeStream): { width: number; height: number } | 
     : { width: v.width, height: v.height };
 }
 
-async function probeMeta(file: string): Promise<{ width: number; height: number; duration: number }> {
+interface ProbedMedia {
+  width: number;
+  height: number;
+  duration: number;
+  videoIndex: number | null; // null = probe failed; let ffmpeg's defaults run
+  audioIndex: number | null; // null = no eligible audio track
+  undecodableAudioOnly: boolean; // audio exists but none of it is decodable
+}
+
+async function probeMeta(file: string): Promise<ProbedMedia> {
   try {
     const { stdout } = await run(ffprobePath, [
       "-v", "quiet", "-print_format", "json", "-show_streams", "-show_format", file,
@@ -963,15 +976,44 @@ async function probeMeta(file: string): Promise<{ width: number; height: number;
       streams?: ProbeStream[];
       format?: { duration?: string };
     };
-    const v = (data.streams ?? []).find((s) => s.codec_type === "video");
+    const streams = data.streams ?? [];
+    const v = streams.find((s) => s.codec_type === "video");
     const duration = Number(data.format?.duration ?? v?.duration ?? 0) || 0;
     const dims = v && displayDimensions(v);
-    if (dims) return { ...dims, duration };
+    if (dims && typeof v.index === "number") {
+      const audio = streams.filter((s) => s.codec_type === "audio");
+      const decodable = audio.find(
+        (s) => typeof s.index === "number" && DECODABLE_AUDIO.has((s.codec_name ?? "").toLowerCase())
+      );
+      return {
+        ...dims,
+        duration,
+        videoIndex: v.index,
+        audioIndex: decodable?.index ?? null,
+        undecodableAudioOnly: audio.length > 0 && !decodable,
+      };
+    }
   } catch {
     /* fall through */
   }
-  return { width: 1080, height: 1920, duration: 0 };
+  return { width: 1080, height: 1920, duration: 0, videoIndex: null, audioIndex: null, undecodableAudioOnly: false };
 }
+
+// -map arguments for the probed streams: just the video and one decodable
+// audio track, skipping Apple's Spatial Audio / mebx metadata streams that
+// default selection would otherwise drag in (and die on). An empty result
+// (failed probe) leaves ffmpeg's default selection in place.
+function mapArgs(meta: ProbedMedia): string[] {
+  if (meta.videoIndex == null) return [];
+  return meta.audioIndex != null
+    ? ["-map", `0:${meta.videoIndex}`, "-map", `0:${meta.audioIndex}`]
+    : ["-map", `0:${meta.videoIndex}`, "-an"];
+}
+
+const UNDECODABLE_AUDIO_ERROR =
+  "This video's audio track uses a codec the renderer can't read (usually iPhone Spatial Audio). " +
+  "Turn off Spatial Audio in Settings → Camera → Record Sound and re-record, or trim the video by a " +
+  "second in the Photos app (which re-exports it with standard audio) and upload that copy.";
 
 export const renderOverlays = onRequest(
   {
@@ -1014,7 +1056,12 @@ export const renderOverlays = onRequest(
 
     try {
       await downloadTo(videoUrl, inputPath);
-      const { width, height, duration } = await probeMeta(inputPath);
+      const meta = await probeMeta(inputPath);
+      const { width, height, duration } = meta;
+      if (meta.undecodableAudioOnly) {
+        res.status(422).json({ error: UNDECODABLE_AUDIO_ERROR });
+        return;
+      }
 
       const clip = spec.clip && Number.isFinite(Number(spec.clip.start)) ? spec.clip : null;
       const clipStart = clip ? Number(clip.start) : 0;
@@ -1031,6 +1078,7 @@ export const renderOverlays = onRequest(
       if (clip && clipDur > 0) args.push("-ss", String(clipStart), "-t", String(clipDur));
       args.push(
         "-i", inputPath,
+        ...mapArgs(meta),
         "-vf", `subtitles=${assPath}:fontsdir=${fontsDir}`,
         "-c:v", "libx264",
         "-preset", "veryfast",
