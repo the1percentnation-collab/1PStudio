@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { SOCIAL_PLATFORMS, publishToSocial } from '../services/socialService';
 import { createDefaultSpec } from '../services/overlayRenderer';
+import { notify, requestNotifyPermission } from '../services/notify';
 
 // datetime-local inputs are LOCAL time; toISOString() alone is UTC and would
 // skew `min` by the user's timezone offset.
@@ -10,7 +11,7 @@ function minSchedule() {
   return d.toISOString().slice(0, 16);
 }
 
-export default function PublishPanel({ videoFile, content, onPublished, filename, thumbnail, mediaType, overlaySpec, words, preRendered = false }) {
+export default function PublishPanel({ videoFile, content, onPublished, filename, thumbnail, mediaType, overlaySpec, words, preRendered = false, itemId, onPublishState }) {
   const isPhoto = mediaType === 'photo';
 
   // The overlay to burn in: the user's saved edits if any, else a default built
@@ -72,21 +73,31 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
     }
 
     setPosting(true);
-    setStatus(null);
     setProgress(0);
     setPhase(null);
+    // The publish runs in the background from here: the user sees a single
+    // "processing" message, can close this panel and keep using the app (the
+    // tab must stay open — the upload/render run in this page), and gets
+    // notified via the library badge, an in-app toast, and — where the
+    // browser allows it — a system notification.
+    setStatus({
+      type: 'processing',
+      message: 'Your video is processing — you’ll be notified when the upload is completed. Keep the app open; you can browse other tabs meanwhile.',
+    });
+    requestNotifyPermission(); // must happen inside the click gesture
+    onPublishState?.(itemId, { publishState: 'publishing' });
     const willBurn = burnIn && hasBurnable && !isPhoto;
-    try {
-      const result = await publishToSocial(videoFile, {
-        post: caption,
-        title,
-        platforms: selected,
-        scheduleDate,
-        onProgress: setProgress,
-        onPhase: setPhase,
-        spec: willBurn ? editSpec : null,
-        burnIn: willBurn,
-      });
+    const isScheduled = Boolean(scheduleDate);
+    publishToSocial(videoFile, {
+      post: caption,
+      title,
+      platforms: selected,
+      scheduleDate,
+      onProgress: setProgress,
+      onPhase: setPhase,
+      spec: willBurn ? editSpec : null,
+      burnIn: willBurn,
+    }).then((result) => {
       // Ayrshare's post id lets us reconcile this record against real
       // outcomes later (scheduled posts can fail hours after being queued).
       const ayrshareId =
@@ -94,7 +105,6 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
         result?.ayrshare?.postId ??
         result?.ayrshare?.posts?.[0]?.id ??
         null;
-      const isScheduled = Boolean(scheduleDate);
       const base = isScheduled
         ? `Scheduled for ${new Date(scheduleDate).toLocaleString()} on ${selected.length} platform${selected.length !== 1 ? 's' : ''}.`
         : `Posted to ${selected.length} platform${selected.length !== 1 ? 's' : ''}.`;
@@ -102,6 +112,12 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
         type: 'ok',
         message: willBurn ? `${base} On-screen text & captions burned in.` : base,
       });
+      onPublishState?.(itemId, {
+        publishState: isScheduled ? 'scheduled' : 'published',
+        publishedAt: Date.now(),
+        publishedPlatforms: selected,
+      });
+      notify('1P Studio', isScheduled ? `"${filename}" is scheduled.` : `"${filename}" was posted to ${selected.length} platform${selected.length !== 1 ? 's' : ''}.`);
       if (onPublished) {
         onPublished({
           id: `post-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -116,11 +132,11 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
           errors: [],
         });
       }
-    } catch (err) {
-      // A video publish can take longer than Firebase Hosting's 60s response
-      // cap, so the app sees a 502/timeout even though Zernio went on to post
-      // it. Treat those as "pending" (check Posts) instead of a hard failure;
-      // real validation errors (4xx) still surface as errors.
+    }).catch((err) => {
+      // A video publish can outlive a flaky connection, so the app can see a
+      // network death even though Zernio went on to post it. Treat those as
+      // "pending" (check Posts) instead of a hard failure; real validation
+      // errors (4xx) still surface as errors.
       const m = err?.message || 'Publish failed.';
       // A failed burn-in means nothing was posted — always a real error, even
       // though its message can look like a network timeout to the regex below.
@@ -131,13 +147,17 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
           type: 'pending',
           message: 'Sent to Zernio, but confirmation timed out — large videos can take a minute to finish publishing. It’s likely live; open the Posts tab in a minute to confirm.',
         });
+        onPublishState?.(itemId, { publishState: 'pending' });
+        notify('1P Studio', `"${filename}" was sent — check the Posts tab to confirm it went live.`);
       } else {
         setStatus({ type: 'error', message: m });
+        onPublishState?.(itemId, { publishState: 'failed' });
+        notify('1P Studio', `Posting "${filename}" failed: ${m.slice(0, 120)}`);
       }
-    } finally {
+    }).finally(() => {
       setPosting(false);
       setPhase(null);
-    }
+    });
   };
 
   const uploadPct = Math.round(progress * 100);
@@ -328,11 +348,9 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
             />
           </div>
           <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>
-            {phase === 'rendering'
-              ? 'Burning in on-screen text & captions… (can take a few minutes — keep this tab open)'
-              : phase === 'publishing' || uploadPct >= 100
-                ? 'Publishing to platforms…'
-                : `Uploading ${isPhoto ? 'photo' : 'video'}… ${uploadPct}%`}
+            {phase || uploadPct >= 100
+              ? 'Processing…'
+              : `Uploading ${isPhoto ? 'photo' : 'video'}… ${uploadPct}%`}
           </div>
         </div>
       )}
@@ -342,12 +360,15 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
           style={{
             fontSize: 12,
             lineHeight: 1.5,
-            color: status.type === 'ok' ? '#00C48C' : status.type === 'pending' ? '#FFC107' : '#FF4444',
+            color: status.type === 'ok' ? '#00C48C'
+              : status.type === 'pending' ? '#FFC107'
+              : status.type === 'processing' ? '#7FB4FF'
+              : '#FF4444',
             marginBottom: 10,
             wordBreak: 'break-word',
           }}
         >
-          {status.type === 'ok' ? '✓ ' : status.type === 'pending' ? '⏳ ' : '✕ '}
+          {status.type === 'ok' ? '✓ ' : status.type === 'pending' || status.type === 'processing' ? '⏳ ' : '✕ '}
           {status.message}
         </div>
       )}
