@@ -4,6 +4,7 @@ import { colors as c, fonts as f, radius as r } from '../theme';
 import { currentUser, signOutUser } from '../services/firebase';
 import { saveUserKeys, watchUserKeys } from '../services/userKeys';
 import { getConnectedAccounts } from '../services/socialService';
+import { isAdmin, fetchAdminJobs } from '../services/admin';
 
 // The keys the Settings tab manages. Each is the user's own credential,
 // stored per-account in Firestore (userConfig/{uid}) and used by the server
@@ -21,8 +22,14 @@ function mask(v) {
   return `${v.slice(0, 4)}••••••••${v.slice(-4)}`;
 }
 
+const STATUS_COLORS = {
+  queued: '#7FB4FF', rendering: '#7FB4FF', publishing: '#7FB4FF',
+  published: '#00C48C', scheduled: '#FFC107', pending: '#FFC107', failed: '#FF5A5A',
+};
+
 export default function SettingsView() {
   const user = currentUser();
+  const admin = isAdmin();
   const [values, setValues] = useState({ zernioApiKey: '', zernioProfileId: '', deepgramApiKey: '', anthropicApiKey: '' });
   const [saved, setSaved] = useState({}); // masked view of what's stored server-side
   const [show, setShow] = useState({});
@@ -95,6 +102,23 @@ export default function SettingsView() {
     }
   };
 
+  // Admin: recent publish activity across all users.
+  const [jobs, setJobs] = useState(null); // null = not loaded, [] = loaded empty
+  const [jobsErr, setJobsErr] = useState(null);
+  const [loadingJobs, setLoadingJobs] = useState(false);
+  const loadJobs = async () => {
+    setLoadingJobs(true);
+    setJobsErr(null);
+    try {
+      setJobs(await fetchAdminJobs());
+    } catch (e) {
+      setJobsErr(e?.message || 'Could not load activity.');
+    } finally {
+      setLoadingJobs(false);
+    }
+  };
+  useEffect(() => { if (admin) loadJobs(); /* eslint-disable-next-line */ }, [admin]);
+
   return (
     <div style={{ maxWidth: 620 }}>
       {/* ACCOUNT */}
@@ -106,8 +130,17 @@ export default function SettingsView() {
           ? <img src={user.photoURL} alt="" style={{ width: 42, height: 42, borderRadius: '50%' }} />
           : <div style={{ width: 42, height: 42, borderRadius: '50%', background: c.surfaceHi }} />}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, color: c.white, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {user?.displayName || 'Signed in'}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 14, color: c.white, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {user?.displayName || 'Signed in'}
+            </span>
+            {admin && (
+              <span style={{
+                background: `${c.red}22`, border: `1px solid ${c.redDim}`, color: c.red,
+                fontFamily: f.mono, fontSize: 9.5, letterSpacing: '0.12em', textTransform: 'uppercase',
+                padding: '2px 6px', borderRadius: 4, flexShrink: 0,
+              }}>Admin</span>
+            )}
           </div>
           <div style={{ fontSize: 12, color: c.textDim, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {user?.email || ''}
@@ -174,6 +207,50 @@ export default function SettingsView() {
           color: testResult.type === 'ok' ? c.success : testResult.type === 'warn' ? c.warn : c.danger,
         }}>
           {testResult.type === 'ok' ? '✓ ' : testResult.type === 'warn' ? '⚠ ' : '✕ '}{testResult.message}
+        </div>
+      )}
+
+      {/* ADMIN — recent publish activity across all users */}
+      {admin && (
+        <div style={{ marginTop: 34, borderTop: `1px solid ${c.border}`, paddingTop: 22 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <SectionTitle>Publish Activity</SectionTitle>
+            <Button variant="ghost" onClick={loadJobs} disabled={loadingJobs} style={{ padding: '7px 12px', fontSize: 12.5 }}>
+              {loadingJobs ? 'Refreshing…' : 'Refresh'}
+            </Button>
+          </div>
+          <div style={{ fontSize: 12.5, color: c.textDim, lineHeight: 1.6, marginBottom: 16 }}>
+            The 50 most recent posts across all accounts, and where each one stands. Admin-only.
+          </div>
+
+          {jobsErr && <div style={{ fontSize: 13, color: c.danger, marginBottom: 12 }}>✕ {jobsErr}</div>}
+          {jobs && jobs.length === 0 && !jobsErr && (
+            <div style={{ fontSize: 13, color: c.textFaint }}>No publish jobs yet.</div>
+          )}
+          {jobs && jobs.map((j) => (
+            <div key={j.id} style={{
+              display: 'flex', alignItems: 'center', gap: 12, padding: '9px 12px', marginBottom: 6,
+              background: c.surface, border: `1px solid ${c.border}`, borderRadius: r.md,
+            }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {j.filename || '(untitled)'}
+                </div>
+                <div style={{ fontSize: 11, color: c.textFaint, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {(j.platforms || []).join(', ') || '—'}
+                  {j.createdAt ? ` · ${new Date(j.createdAt).toLocaleString()}` : ''}
+                </div>
+                {j.error && <div style={{ fontSize: 11, color: c.danger, marginTop: 2, lineHeight: 1.4 }}>{j.error}</div>}
+              </div>
+              <span style={{
+                flexShrink: 0, fontFamily: f.mono, fontSize: 9.5, letterSpacing: '0.1em', textTransform: 'uppercase',
+                padding: '3px 7px', borderRadius: 4,
+                color: STATUS_COLORS[j.status] || c.textDim,
+                background: `${STATUS_COLORS[j.status] || c.textDim}18`,
+                border: `1px solid ${STATUS_COLORS[j.status] || c.textDim}44`,
+              }}>{j.status}</span>
+            </div>
+          ))}
         </div>
       )}
     </div>
