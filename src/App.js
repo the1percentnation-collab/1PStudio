@@ -1,6 +1,9 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { watchPublishJob, TERMINAL_JOB_STATES } from './services/publishJobs';
 import { notify } from './services/notify';
+import { watchAuth } from './services/firebase';
+import SignInGate from './components/SignInGate';
+import SettingsView from './components/SettingsView';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import CalendarView from './components/CalendarView';
@@ -73,6 +76,7 @@ const VIEW_META = {
   analytics: { title: 'Analytics', subtitle: 'Performance & content insights' },
   library: { title: 'Library', subtitle: 'Saved generated content' },
   accounts: { title: 'Accounts', subtitle: 'Connect your social platforms' },
+  settings: { title: 'Settings', subtitle: 'Your API keys' },
 };
 
 export default function App() {
@@ -83,6 +87,11 @@ export default function App() {
   const [library, setLibrary] = useState(() => loadJSON(LIBRARY_KEY));
   const [posts, setPosts] = useState(() => loadJSON(POSTS_KEY));
   const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 768 : false));
+
+  // Auth gate. `authUser === undefined` = still resolving (show a splash);
+  // null = signed out (show SignInGate); object = signed in (show the app).
+  const [authUser, setAuthUser] = useState(undefined);
+  useEffect(() => watchAuth(setAuthUser), []);
 
   useEffect(() => { saveJSON(LIBRARY_KEY, library); }, [library]);
 
@@ -457,6 +466,9 @@ export default function App() {
     if (view === 'accounts') {
       return <AccountsView />;
     }
+    if (view === 'settings') {
+      return <SettingsView />;
+    }
     // composer
     return (
       <>
@@ -518,6 +530,22 @@ export default function App() {
       </>
     );
   };
+
+  // Auth gate: splash while resolving, sign-in wall when signed out.
+  if (authUser === undefined) {
+    return (
+      <div style={{ minHeight: '100vh', background: c.bg, color: c.textDim, fontFamily: f.body,
+        display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <GlowBackground />
+        <div style={{ position: 'relative', zIndex: 1, fontFamily: f.display, fontSize: 28, letterSpacing: '0.04em' }}>
+          1P STUDIO…
+        </div>
+      </div>
+    );
+  }
+  if (!authUser) {
+    return <SignInGate />;
+  }
 
   return (
     <div style={{ minHeight: '100vh', background: c.bg, color: c.text, fontFamily: f.body }}>

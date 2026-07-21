@@ -66,8 +66,11 @@ jobs:
           # Storage and Firestore rules are deployed manually from the console
           # — the CI service account lacks the Firebase Rules Admin role, so a
           # rules deploy here 403s and blocks the whole deploy (run 29795230954).
-          # The client needs firestore.rules live (authed read/write) for
-          # publishJobs docs; grant the role and add ",firestore" to re-enable.
+          # IMPORTANT: firestore.rules now scopes userConfig/{uid} (API keys)
+          # and publishJobs to their owner. Those rules MUST be live before any
+          # user saves keys in Settings — otherwise keys are readable by any
+          # signed-in user. Paste firestore.rules in the console, or grant the
+          # service account "Firebase Rules Admin" and add ",firestore" here.
           firebase deploy --only functions --project onepstudio-9a3ef --force
 
       - name: Deploy to Firebase Hosting

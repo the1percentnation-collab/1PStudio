@@ -1,8 +1,27 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Each user's API keys. Readable/writable ONLY by that user. The Cloud
+    // Functions use the Admin SDK, which bypasses these rules, so the server
+    // can still read a user's keys to act on their behalf.
+    match /userConfig/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Background publish jobs. Scoped to their owner so no other signed-in
+    // user can read someone's job (media URLs, captions) or tamper with it.
+    // The worker (Admin SDK) bypasses these rules to drive the job.
+    match /publishJobs/{jobId} {
+      allow create: if request.auth != null
+                    && request.resource.data.ownerUid == request.auth.uid;
+      allow read, update, delete: if request.auth != null
+                    && resource.data.ownerUid == request.auth.uid;
+    }
+
+    // Everything else is server-only (Admin SDK). No open client access.
     match /{document=**} {
-      allow read, write: if request.auth != null;
+      allow read, write: if false;
     }
   }
 }

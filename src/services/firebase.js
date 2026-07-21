@@ -1,11 +1,18 @@
-// Firebase web SDK init for direct browser -> Storage uploads.
+// Firebase web SDK init: Storage uploads, Firestore, and Google auth.
 //
 // These values are the public Firebase web config (safe to ship in the
 // client bundle). They can be overridden via REACT_APP_FIREBASE_* env vars.
 import { initializeApp } from 'firebase/app';
 import { getStorage } from 'firebase/storage';
 import { getFirestore } from 'firebase/firestore';
-import { getAuth, signInAnonymously } from 'firebase/auth';
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithRedirect,
+  getRedirectResult,
+  onAuthStateChanged,
+  signOut,
+} from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey: process.env.REACT_APP_FIREBASE_API_KEY || 'AIzaSyDvCEL9_4GM8GiBTtZCyG7kdOno-8yv5yU',
@@ -28,14 +35,52 @@ const auth = getAuth(app);
 // timeout with CPU allocated the whole time.
 export const FUNCTIONS_ORIGIN = `https://us-central1-${firebaseConfig.projectId}.cloudfunctions.net`;
 
-// Storage rules require an authenticated request. Anonymous auth satisfies
-// that without any login UI. (Enable Anonymous sign-in in the Firebase
-// console: Authentication -> Sign-in method -> Anonymous.)
-let authPromise = null;
-export function ensureAuth() {
-  if (auth.currentUser) return Promise.resolve(auth.currentUser);
-  if (!authPromise) {
-    authPromise = signInAnonymously(auth).then(({ user }) => user);
-  }
-  return authPromise;
+// ---------------------------------------------------------------------------
+// Auth. Sign-in is real Google (not anonymous) so each user's API keys are
+// tied to a stable account and sync across devices. Redirect flow (not popup)
+// because popups are unreliable in iOS Safari, the primary client.
+// Console prerequisite: Authentication -> Sign-in method -> enable Google.
+// ---------------------------------------------------------------------------
+const provider = new GoogleAuthProvider();
+
+// Completes a pending redirect sign-in on the load that returns from Google.
+// Safe to ignore errors here — onAuthStateChanged is the source of truth.
+export const redirectResult = getRedirectResult(auth).catch(() => null);
+
+export function signInWithGoogle() {
+  return signInWithRedirect(auth, provider);
+}
+
+export function signOutUser() {
+  return signOut(auth);
+}
+
+// Subscribe to auth state. Fires immediately with the current user (or null).
+export function watchAuth(cb) {
+  return onAuthStateChanged(auth, cb);
+}
+
+export function currentUser() {
+  return auth.currentUser;
+}
+
+export function currentUid() {
+  return auth.currentUser?.uid ?? null;
+}
+
+// Fresh Firebase ID token for authenticating calls to our Cloud Functions.
+export async function getIdToken() {
+  const user = auth.currentUser;
+  if (!user) return null;
+  return user.getIdToken();
+}
+
+// Resolves to the signed-in user. Storage/Firestore writes require auth; the
+// app is gated behind sign-in, so by the time anything calls this a user
+// exists. Rejects if somehow called while signed out.
+export async function ensureAuth() {
+  if (auth.currentUser) return auth.currentUser;
+  await redirectResult;
+  if (auth.currentUser) return auth.currentUser;
+  throw new Error('You’re signed out — sign in to continue.');
 }
