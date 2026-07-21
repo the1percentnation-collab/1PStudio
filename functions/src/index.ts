@@ -1,6 +1,8 @@
 import { initializeApp } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
+import { FieldValue } from "firebase-admin/firestore";
 import { onRequest } from "firebase-functions/v2/https";
+import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { randomUUID } from "crypto";
 import { spawn } from "child_process";
 import { promises as fs } from "fs";
@@ -8,6 +10,16 @@ import * as os from "os";
 import * as path from "path";
 
 initializeApp();
+
+// An error with an HTTP-ish status code, so shared pipeline helpers can be
+// surfaced correctly by both the HTTP endpoints and the background worker.
+class JobError extends Error {
+  code: number;
+  constructor(code: number, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
 
 function buildSystemPrompt(isPhoto: boolean): string {
   const media = isPhoto ? "TikTok photo post" : "TikTok video";
@@ -295,6 +307,95 @@ async function listZernioAccounts(
     .filter((a): a is ZernioAccount => a !== null);
 }
 
+// The Zernio publish itself, shared by the publishPost endpoint (legacy
+// clients) and the background publish worker. Throws JobError on anything
+// that should stop the publish.
+async function performZernioPublish(input: PublishBody): Promise<{ mediaUrl: string; skipped: string[]; ayrshare: unknown }> {
+  const apiKey = process.env.ZERNIO_API_KEY;
+  if (!apiKey) throw new JobError(500, "ZERNIO_API_KEY is not configured on the server.");
+
+  const { mediaUrl, post, title: rawTitle, platforms: rawPlatforms, scheduleDate, mediaType } = input;
+  const isPhoto = mediaType === "photo";
+
+  const requested = Array.from(new Set(
+    (rawPlatforms ?? []).map((p) => p.toLowerCase()).filter((p) => TO_ZERNIO[p])
+  ));
+
+  if (requested.length === 0) throw new JobError(400, "Select at least one supported platform to post to.");
+  if (isPhoto && requested.includes("youtube")) {
+    throw new JobError(400, "YouTube only supports video — deselect YouTube to post this photo.");
+  }
+  if (!mediaUrl || !/^https?:\/\//.test(mediaUrl)) {
+    throw new JobError(400, "A valid media URL is required (upload the file first).");
+  }
+
+  const postText = (post ?? "").trim();
+  if (!postText) throw new JobError(400, "Caption text is required to publish.");
+
+  try {
+    // Resolve the profile, then map each requested platform to its account.
+    const profileId = await resolveProfileId(apiKey);
+    if (!profileId) {
+      throw new JobError(400, "No Zernio profile is set up for this API key. Create one and connect accounts in the Zernio dashboard.");
+    }
+
+    const accounts = await listZernioAccounts(apiKey, profileId);
+    const targets = requested
+      .map((p) => accounts.find((a) => a.platform === p && a.connected))
+      .filter((a): a is ZernioAccount => Boolean(a));
+    const skipped = requested.filter((p) => !targets.some((t) => t.platform === p));
+
+    if (targets.length === 0) {
+      throw new JobError(400,
+        `None of the selected platforms are connected in Zernio${skipped.length ? ` (${skipped.join(", ")})` : ""}. Connect them in the Zernio dashboard, then try again.`);
+    }
+
+    // Build the Zernio request, including platform-specific options.
+    const title = (rawTitle ?? postText).slice(0, 99);
+    const body: Record<string, unknown> = {
+      content: postText,
+      platforms: targets.map((t) => {
+        const platform = TO_ZERNIO[t.platform] ?? t.platform;
+        const entry: Record<string, unknown> = { platform, accountId: t.id };
+        if (platform === "youtube") {
+          entry.platformSpecificData = { title, privacyStatus: "public" };
+        }
+        if (platform === "instagram" && !isPhoto) {
+          // Instagram video publishes as a Reel; photos post to the feed.
+          entry.platformSpecificData = { mediaType: "REELS" };
+        }
+        return entry;
+      }),
+      mediaItems: [{ type: isPhoto ? "image" : "video", url: mediaUrl }],
+    };
+
+    // Optional scheduling — Zernio accepts an ISO 8601 date in the future.
+    if (scheduleDate && !Number.isNaN(Date.parse(scheduleDate))) {
+      body.scheduledFor = new Date(scheduleDate).toISOString();
+      body.timezone = "UTC";
+    } else {
+      body.publishNow = true;
+    }
+
+    const { ok, status, data } = await zernioFetch("/posts", apiKey, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+
+    if (!ok) {
+      // Surface Zernio's real reason instead of hiding it behind a status.
+      throw new JobError(status, zernioError(data) || `Zernio error ${status}`);
+    }
+
+    // `ayrshare` key kept for client/reconciler back-compat; it carries the
+    // provider's post id (postId) used to match against post history later.
+    return { mediaUrl, skipped, ayrshare: data };
+  } catch (e) {
+    if (e instanceof JobError) throw e;
+    throw new JobError(502, `Failed to reach Zernio: ${e instanceof Error ? e.message : "unknown error"}`);
+  }
+}
+
 export const publishPost = onRequest(
   {
     cors: true,
@@ -306,104 +407,12 @@ export const publishPost = onRequest(
       res.status(405).json({ error: "Method not allowed" });
       return;
     }
-
-    const apiKey = process.env.ZERNIO_API_KEY;
-    if (!apiKey) {
-      res.status(500).json({ error: "ZERNIO_API_KEY is not configured on the server." });
-      return;
-    }
-
-    const { mediaUrl, post, title: rawTitle, platforms: rawPlatforms, scheduleDate, mediaType } = (req.body ?? {}) as PublishBody;
-    const isPhoto = mediaType === "photo";
-
-    const requested = Array.from(new Set(
-      (rawPlatforms ?? []).map((p) => p.toLowerCase()).filter((p) => TO_ZERNIO[p])
-    ));
-
-    if (requested.length === 0) {
-      res.status(400).json({ error: "Select at least one supported platform to post to." });
-      return;
-    }
-    if (isPhoto && requested.includes("youtube")) {
-      res.status(400).json({ error: "YouTube only supports video — deselect YouTube to post this photo." });
-      return;
-    }
-    if (!mediaUrl || !/^https?:\/\//.test(mediaUrl)) {
-      res.status(400).json({ error: "A valid media URL is required (upload the file first)." });
-      return;
-    }
-
-    const postText = (post ?? "").trim();
-    if (!postText) {
-      res.status(400).json({ error: "Caption text is required to publish." });
-      return;
-    }
-
     try {
-      // Resolve the profile, then map each requested platform to its account.
-      const profileId = await resolveProfileId(apiKey);
-      if (!profileId) {
-        res.status(400).json({ error: "No Zernio profile is set up for this API key. Create one and connect accounts in the Zernio dashboard." });
-        return;
-      }
-
-      const accounts = await listZernioAccounts(apiKey, profileId);
-      const targets = requested
-        .map((p) => accounts.find((a) => a.platform === p && a.connected))
-        .filter((a): a is ZernioAccount => Boolean(a));
-      const skipped = requested.filter((p) => !targets.some((t) => t.platform === p));
-
-      if (targets.length === 0) {
-        res.status(400).json({
-          error: `None of the selected platforms are connected in Zernio${skipped.length ? ` (${skipped.join(", ")})` : ""}. Connect them in the Zernio dashboard, then try again.`,
-        });
-        return;
-      }
-
-      // Build the Zernio request, including platform-specific options.
-      const title = (rawTitle ?? postText).slice(0, 99);
-      const body: Record<string, unknown> = {
-        content: postText,
-        platforms: targets.map((t) => {
-          const platform = TO_ZERNIO[t.platform] ?? t.platform;
-          const entry: Record<string, unknown> = { platform, accountId: t.id };
-          if (platform === "youtube") {
-            entry.platformSpecificData = { title, privacyStatus: "public" };
-          }
-          if (platform === "instagram" && !isPhoto) {
-            // Instagram video publishes as a Reel; photos post to the feed.
-            entry.platformSpecificData = { mediaType: "REELS" };
-          }
-          return entry;
-        }),
-        mediaItems: [{ type: isPhoto ? "image" : "video", url: mediaUrl }],
-      };
-
-      // Optional scheduling — Zernio accepts an ISO 8601 date in the future.
-      if (scheduleDate && !Number.isNaN(Date.parse(scheduleDate))) {
-        body.scheduledFor = new Date(scheduleDate).toISOString();
-        body.timezone = "UTC";
-      } else {
-        body.publishNow = true;
-      }
-
-      const { ok, status, data } = await zernioFetch("/posts", apiKey, {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
-
-      if (!ok) {
-        // Surface Zernio's real reason instead of hiding it behind a status.
-        const detail = zernioError(data) || `Zernio error ${status}`;
-        res.status(status).json({ error: detail, details: data });
-        return;
-      }
-
-      // `ayrshare` key kept for client/reconciler back-compat; it carries the
-      // provider's post id (postId) used to match against post history later.
-      res.json({ status: "ok", mediaUrl, skipped, ayrshare: data });
+      const result = await performZernioPublish((req.body ?? {}) as PublishBody);
+      res.json({ status: "ok", ...result });
     } catch (e) {
-      res.status(502).json({ error: `Failed to reach Zernio: ${e instanceof Error ? e.message : "unknown error"}` });
+      const code = e instanceof JobError ? e.code : 500;
+      res.status(code).json({ error: e instanceof Error ? e.message : "Publish failed." });
     }
   }
 );
@@ -1041,74 +1050,162 @@ export const renderOverlays = onRequest(
     // at 60s, but the render keeps running and lands at a known location.
     const safeJobId = typeof jobId === "string" && /^[A-Za-z0-9-]{8,64}$/.test(jobId) ? jobId : null;
 
-    const hasText = (spec?.texts ?? []).some((t) => t.text && t.text.trim());
-    const hasCaptions = Boolean(spec?.captions?.enabled && (spec?.captions?.lines ?? []).length);
-    if (!spec || (!hasText && !hasCaptions)) {
-      // Nothing to burn in — hand the original back so the caller can post it.
-      res.json({ status: "ok", videoUrl, rendered: false });
-      return;
+    try {
+      const out = await performOverlayRender(videoUrl, spec ?? null, safeJobId);
+      res.json({ status: "ok", ...out });
+    } catch (e) {
+      const code = e instanceof JobError ? e.code : 500;
+      res.status(code).json({ error: e instanceof Error ? e.message : "Overlay render failed." });
     }
+  }
+);
 
-    const work = path.join(os.tmpdir(), randomUUID());
-    const inputPath = `${work}-in.mp4`;
-    const assPath = `${work}-ov.ass`;
-    const outputPath = `${work}-out.mp4`;
+// The burn-in itself, shared by the renderOverlays endpoint (legacy clients)
+// and the background publish worker. rendered:false means the spec had
+// nothing to draw, so the original URL is handed back. Throws JobError on
+// anything that should stop the publish.
+async function performOverlayRender(
+  videoUrl: string, spec: OverlaySpec | null, outputName: string | null
+): Promise<{ videoUrl: string; rendered: boolean }> {
+  const hasText = (spec?.texts ?? []).some((t) => t.text && t.text.trim());
+  const hasCaptions = Boolean(spec?.captions?.enabled && (spec?.captions?.lines ?? []).length);
+  if (!spec || (!hasText && !hasCaptions)) return { videoUrl, rendered: false };
+
+  const work = path.join(os.tmpdir(), randomUUID());
+  const inputPath = `${work}-in.mp4`;
+  const assPath = `${work}-ov.ass`;
+  const outputPath = `${work}-out.mp4`;
+
+  try {
+    await downloadTo(videoUrl, inputPath);
+    const meta = await probeMeta(inputPath);
+    const { width, height, duration } = meta;
+    if (meta.undecodableAudioOnly) throw new JobError(422, UNDECODABLE_AUDIO_ERROR);
+
+    const clip = spec.clip && Number.isFinite(Number(spec.clip.start)) ? spec.clip : null;
+    const clipStart = clip ? Number(clip.start) : 0;
+    const clipDur = clip ? Math.max(0, Number(clip.end) - clipStart) : 0;
+
+    const { ass, count } = buildOverlayAss(spec, width, height, duration || 3600, clipStart);
+    if (count === 0) return { videoUrl, rendered: false };
+    await fs.writeFile(assPath, ass);
+
+    const args = ["-y"];
+    if (clip && clipDur > 0) args.push("-ss", String(clipStart), "-t", String(clipDur));
+    args.push(
+      "-i", inputPath,
+      ...mapArgs(meta),
+      "-vf", `subtitles=${assPath}:fontsdir=${fontsDir}`,
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-pix_fmt", "yuv420p",
+      "-c:a", "aac",
+      "-b:a", "128k",
+      "-movflags", "+faststart",
+      outputPath,
+    );
+    await run(ffmpegPath, args);
+
+    const bucket = getStorage().bucket();
+    const token = randomUUID();
+    const objectPath = outputName ? `rendered/${outputName}.mp4` : `rendered/${Date.now()}-${randomUUID()}.mp4`;
+    await bucket.upload(outputPath, {
+      destination: objectPath,
+      resumable: false,
+      metadata: { contentType: "video/mp4", metadata: { firebaseStorageDownloadTokens: token } },
+    });
+    const outUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(
+      objectPath
+    )}?alt=media&token=${token}`;
+
+    return { videoUrl: outUrl, rendered: true };
+  } finally {
+    await Promise.all(
+      [inputPath, assPath, outputPath].map((f) => fs.unlink(f).catch(() => undefined))
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Background publish worker — the server-side pipeline. The app uploads the
+// media to Storage, writes a publishJobs/{jobId} doc, and is DONE: this
+// worker picks the doc up, burns in overlays if requested, publishes via
+// Zernio, and records every state change on the doc. The app (any session,
+// any time) just watches the doc — closing the tab no longer kills a post.
+// ---------------------------------------------------------------------------
+
+interface PublishJobDoc {
+  status?: string;
+  mediaUrl?: string;
+  post?: string;
+  title?: string;
+  platforms?: string[];
+  scheduleDate?: string | null;
+  mediaType?: string;
+  burnIn?: boolean;
+  spec?: OverlaySpec | null;
+}
+
+export const publishJobWorker = onDocumentCreated(
+  {
+    document: "publishJobs/{jobId}",
+    timeoutSeconds: 540,
+    memory: "2GiB",
+    cpu: 2,
+    concurrency: 1,
+    retry: false,
+  },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const job = snap.data() as PublishJobDoc;
+    // Eventarc delivers at-least-once — a redelivered event for a job that
+    // already started must not publish twice.
+    if (job.status && job.status !== "queued") return;
+
+    const patch = (p: Record<string, unknown>) =>
+      snap.ref.set({ ...p, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
 
     try {
-      await downloadTo(videoUrl, inputPath);
-      const meta = await probeMeta(inputPath);
-      const { width, height, duration } = meta;
-      if (meta.undecodableAudioOnly) {
-        res.status(422).json({ error: UNDECODABLE_AUDIO_ERROR });
-        return;
+      let mediaUrl = String(job.mediaUrl ?? "");
+      if (!/^https?:\/\//.test(mediaUrl)) throw new JobError(400, "Job has no valid media URL.");
+
+      if (job.burnIn && job.spec && job.mediaType !== "photo") {
+        await patch({ status: "rendering" });
+        const r = await performOverlayRender(mediaUrl, job.spec, event.params.jobId);
+        // Burn-in was requested: a no-op render means the text would be
+        // missing from the published video — stop rather than post bare.
+        if (!r.rendered) throw new JobError(422, "The render produced no burned-in text — nothing was posted.");
+        mediaUrl = r.videoUrl;
       }
 
-      const clip = spec.clip && Number.isFinite(Number(spec.clip.start)) ? spec.clip : null;
-      const clipStart = clip ? Number(clip.start) : 0;
-      const clipDur = clip ? Math.max(0, Number(clip.end) - clipStart) : 0;
-
-      const { ass, count } = buildOverlayAss(spec, width, height, duration || 3600, clipStart);
-      if (count === 0) {
-        res.json({ status: "ok", videoUrl, rendered: false });
-        return;
-      }
-      await fs.writeFile(assPath, ass);
-
-      const args = ["-y"];
-      if (clip && clipDur > 0) args.push("-ss", String(clipStart), "-t", String(clipDur));
-      args.push(
-        "-i", inputPath,
-        ...mapArgs(meta),
-        "-vf", `subtitles=${assPath}:fontsdir=${fontsDir}`,
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-movflags", "+faststart",
-        outputPath,
-      );
-      await run(ffmpegPath, args);
-
-      const bucket = getStorage().bucket();
-      const token = randomUUID();
-      const objectPath = safeJobId ? `rendered/${safeJobId}.mp4` : `rendered/${Date.now()}-${randomUUID()}.mp4`;
-      await bucket.upload(outputPath, {
-        destination: objectPath,
-        resumable: false,
-        metadata: { contentType: "video/mp4", metadata: { firebaseStorageDownloadTokens: token } },
+      await patch({ status: "publishing", finalMediaUrl: mediaUrl });
+      const out = await performZernioPublish({
+        mediaUrl,
+        post: job.post,
+        title: job.title,
+        platforms: job.platforms,
+        scheduleDate: job.scheduleDate ?? undefined,
+        mediaType: job.mediaType,
       });
-      const outUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodeURIComponent(
-        objectPath
-      )}?alt=media&token=${token}`;
 
-      res.json({ status: "ok", videoUrl: outUrl, rendered: true });
+      // Only Firestore-safe scalars go on the doc (the raw Zernio payload can
+      // contain nested arrays, which Firestore rejects — and a failed success-
+      // write would mislabel a completed publish as failed).
+      const az = out.ayrshare as { id?: unknown; postId?: unknown; posts?: { id?: unknown }[] } | null;
+      const ayrshareId = az?.id ?? az?.postId ?? az?.posts?.[0]?.id ?? null;
+      await patch({
+        status: job.scheduleDate ? "scheduled" : "published",
+        ayrshareId: ayrshareId != null ? String(ayrshareId) : null,
+        skippedPlatforms: out.skipped ?? [],
+        completedAt: FieldValue.serverTimestamp(),
+      });
     } catch (e) {
-      res.status(500).json({ error: e instanceof Error ? e.message : "Overlay render failed." });
-    } finally {
-      await Promise.all(
-        [inputPath, assPath, outputPath].map((f) => fs.unlink(f).catch(() => undefined))
-      );
+      await patch({
+        status: "failed",
+        error: e instanceof Error ? e.message : "Publish job failed.",
+        completedAt: FieldValue.serverTimestamp(),
+      }).catch(() => undefined);
     }
   }
 );

@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
-import { SOCIAL_PLATFORMS, publishToSocial } from '../services/socialService';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { SOCIAL_PLATFORMS } from '../services/socialService';
+import { startPublishJob, watchPublishJob, TERMINAL_JOB_STATES } from '../services/publishJobs';
 import { createDefaultSpec } from '../services/overlayRenderer';
 import { notify, requestNotifyPermission } from '../services/notify';
 
@@ -75,88 +76,92 @@ export default function PublishPanel({ videoFile, content, onPublished, filename
     setPosting(true);
     setProgress(0);
     setPhase(null);
-    // The publish runs in the background from here: the user sees a single
-    // "processing" message, can close this panel and keep using the app (the
-    // tab must stay open — the upload/render run in this page), and gets
-    // notified via the library badge, an in-app toast, and — where the
-    // browser allows it — a system notification.
-    setStatus({
-      type: 'processing',
-      message: 'Your video is processing — you’ll be notified when the upload is completed. Keep the app open; you can browse other tabs meanwhile.',
-    });
+    setStatus({ type: 'processing', message: `Uploading your ${isPhoto ? 'photo' : 'video'}… keep the app open until the upload finishes.` });
     requestNotifyPermission(); // must happen inside the click gesture
-    onPublishState?.(itemId, { publishState: 'publishing' });
     const willBurn = burnIn && hasBurnable && !isPhoto;
     const isScheduled = Boolean(scheduleDate);
-    publishToSocial(videoFile, {
+
+    startPublishJob(videoFile, {
       post: caption,
       title,
       platforms: selected,
       scheduleDate,
-      onProgress: setProgress,
-      onPhase: setPhase,
+      mediaType,
+      filename,
       spec: willBurn ? editSpec : null,
       burnIn: willBurn,
-    }).then((result) => {
-      // Ayrshare's post id lets us reconcile this record against real
-      // outcomes later (scheduled posts can fail hours after being queued).
-      const ayrshareId =
-        result?.ayrshare?.id ??
-        result?.ayrshare?.postId ??
-        result?.ayrshare?.posts?.[0]?.id ??
-        null;
-      const base = isScheduled
-        ? `Scheduled for ${new Date(scheduleDate).toLocaleString()} on ${selected.length} platform${selected.length !== 1 ? 's' : ''}.`
-        : `Posted to ${selected.length} platform${selected.length !== 1 ? 's' : ''}.`;
+      onProgress: setProgress,
+    }).then((jobId) => {
+      // The upload is done and the server owns the job from here — closing
+      // the app no longer cancels anything.
+      setPosting(false);
       setStatus({
-        type: 'ok',
-        message: willBurn ? `${base} On-screen text & captions burned in.` : base,
+        type: 'processing',
+        message: 'Your video is processing on the server — you’ll be notified when the upload is completed. It’s safe to close the app.',
       });
-      onPublishState?.(itemId, {
-        publishState: isScheduled ? 'scheduled' : 'published',
-        publishedAt: Date.now(),
-        publishedPlatforms: selected,
-      });
-      notify('1P Studio', isScheduled ? `"${filename}" is scheduled.` : `"${filename}" was posted to ${selected.length} platform${selected.length !== 1 ? 's' : ''}.`);
-      if (onPublished) {
-        onPublished({
-          id: `post-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          ayrshareId,
-          caption,
-          title,
-          platforms: selected,
-          filename,
-          thumbnail: thumbnail || null,
-          date: scheduleDate || new Date().toISOString(),
-          status: isScheduled ? 'scheduled' : 'published',
-          errors: [],
+      if (onPublishState && itemId != null) {
+        // The App tracks this job on the library item: it shows the badge,
+        // fires the toast/notification on completion (even after a reload),
+        // and records the post. This panel only mirrors progress if left open.
+        onPublishState(itemId, {
+          publishState: 'publishing',
+          publishJobId: jobId,
+          publishMeta: { caption, title, platforms: selected, scheduleDate: scheduleDate || null },
         });
+        watchJob(jobId, { ownCompletion: false, isScheduled });
+      } else {
+        // No library item to hang the job on (e.g. Clips) — this panel owns
+        // the completion handling itself.
+        watchJob(jobId, { ownCompletion: true, isScheduled });
       }
     }).catch((err) => {
-      // A video publish can outlive a flaky connection, so the app can see a
-      // network death even though Zernio went on to post it. Treat those as
-      // "pending" (check Posts) instead of a hard failure; real validation
-      // errors (4xx) still surface as errors.
-      const m = err?.message || 'Publish failed.';
-      // A failed burn-in means nothing was posted — always a real error, even
-      // though its message can look like a network timeout to the regex below.
-      const likelyTimedOut = !err?.renderFailed &&
-        (/\b(502|503|504)\b/.test(m) || /reach|timeout|timed out|network|failed to fetch|load failed/i.test(m));
-      if (likelyTimedOut) {
-        setStatus({
-          type: 'pending',
-          message: 'Sent to Zernio, but confirmation timed out — large videos can take a minute to finish publishing. It’s likely live; open the Posts tab in a minute to confirm.',
-        });
-        onPublishState?.(itemId, { publishState: 'pending' });
-        notify('1P Studio', `"${filename}" was sent — check the Posts tab to confirm it went live.`);
-      } else {
-        setStatus({ type: 'error', message: m });
-        onPublishState?.(itemId, { publishState: 'failed' });
-        notify('1P Studio', `Posting "${filename}" failed: ${m.slice(0, 120)}`);
-      }
-    }).finally(() => {
       setPosting(false);
-      setPhase(null);
+      setStatus({ type: 'error', message: err?.message || 'Upload failed — nothing was posted. Try again.' });
+    });
+  };
+
+  // Panel-local mirror of the server job, for live status while the panel
+  // stays open. When ownCompletion is set it also records the post and
+  // notifies (used only when there's no library item for App to track).
+  const unsubRef = useRef(null);
+  useEffect(() => () => { if (unsubRef.current) unsubRef.current(); }, []);
+  const watchJob = (jobId, { ownCompletion, isScheduled }) => {
+    if (unsubRef.current) unsubRef.current();
+    unsubRef.current = watchPublishJob(jobId, (job) => {
+      if (job.status === 'rendering') {
+        setStatus({ type: 'processing', message: 'Burning in on-screen text & captions on the server… safe to close the app.' });
+      } else if (job.status === 'publishing') {
+        setStatus({ type: 'processing', message: 'Publishing to platforms… safe to close the app.' });
+      } else if (job.status === 'failed') {
+        setStatus({ type: 'error', message: job.error || 'Publish failed — nothing was posted.' });
+      } else if (TERMINAL_JOB_STATES.includes(job.status)) {
+        const base = isScheduled
+          ? `Scheduled for ${new Date(scheduleAt || Date.now()).toLocaleString()} on ${selected.length} platform${selected.length !== 1 ? 's' : ''}.`
+          : `Posted to ${selected.length} platform${selected.length !== 1 ? 's' : ''}.`;
+        setStatus({ type: 'ok', message: base });
+      }
+      if (TERMINAL_JOB_STATES.includes(job.status)) {
+        if (unsubRef.current) { unsubRef.current(); unsubRef.current = null; }
+        if (ownCompletion) {
+          if (job.status !== 'failed' && onPublished) {
+            onPublished({
+              id: `post-${jobId}`,
+              ayrshareId: job.ayrshareId,
+              caption,
+              title,
+              platforms: selected,
+              filename,
+              thumbnail: thumbnail || null,
+              date: job.scheduleDate || new Date().toISOString(),
+              status: job.status,
+              errors: [],
+            });
+          }
+          notify('1P Studio', job.status === 'failed'
+            ? `Posting "${filename}" failed: ${(job.error || '').slice(0, 120)}`
+            : job.status === 'scheduled' ? `"${filename}" is scheduled.` : `"${filename}" was posted.`);
+        }
+      }
     });
   };
 

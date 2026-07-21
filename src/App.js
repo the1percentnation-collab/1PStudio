@@ -1,4 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { watchPublishJob, TERMINAL_JOB_STATES } from './services/publishJobs';
+import { notify } from './services/notify';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import CalendarView from './components/CalendarView';
@@ -220,10 +222,11 @@ export default function App() {
     setPosts((prev) => [record, ...prev]);
   }, []);
 
-  // Publishes run in the background now; the library item carries the live
-  // state (publishing → published/pending/failed) so the Library shows a
-  // badge, and terminal states surface an app-wide toast — the "you'll be
-  // notified" promise even when the publish panel is closed or off-screen.
+  // Publishes run server-side now (publishJobs docs + worker function); the
+  // library item carries the live state (publishing → published/failed) so
+  // the Library shows a badge, and terminal states surface an app-wide toast
+  // — the "you'll be notified" promise even when the publish panel is closed
+  // or off-screen.
   const [toast, setToast] = useState(null); // { kind: 'ok'|'warn'|'error', message }
   const toastTimer = useRef(null);
   const handlePublishState = useCallback((id, patch) => {
@@ -244,6 +247,59 @@ export default function App() {
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 7000);
   }, []);
+
+  // Watches every library item with an in-flight server publish job and
+  // resolves it: badge flip, post record, toast, notification. Because the
+  // job id is persisted on the item, this also reconciles jobs that finished
+  // while the app was closed — reopening the app picks them right up.
+  const jobSubsRef = useRef(new Map()); // jobId -> unsubscribe
+  const settledJobsRef = useRef(new Set()); // guards double-fired snapshots
+  useEffect(() => {
+    const active = new Map(
+      library
+        .filter((i) => i.publishState === 'publishing' && i.publishJobId)
+        .map((i) => [i.publishJobId, i])
+    );
+    for (const [jobId, unsub] of jobSubsRef.current) {
+      if (!active.has(jobId)) {
+        unsub();
+        jobSubsRef.current.delete(jobId);
+      }
+    }
+    for (const [jobId, item] of active) {
+      if (jobSubsRef.current.has(jobId)) continue;
+      const unsub = watchPublishJob(jobId, (job) => {
+        if (!TERMINAL_JOB_STATES.includes(job.status)) return;
+        if (settledJobsRef.current.has(jobId)) return;
+        settledJobsRef.current.add(jobId);
+        const meta = item.publishMeta || {};
+        if (job.status !== 'failed') {
+          handlePublished({
+            id: `post-${jobId}`,
+            ayrshareId: job.ayrshareId,
+            caption: meta.caption || '',
+            title: meta.title || '',
+            platforms: meta.platforms || [],
+            filename: item.filename,
+            thumbnail: item.frames?.hookFrame || null,
+            date: job.scheduleDate || new Date().toISOString(),
+            status: job.status,
+            errors: [],
+          });
+        }
+        notify('1P Studio', job.status === 'failed'
+          ? `Posting "${item.filename}" failed: ${(job.error || '').slice(0, 120)}`
+          : job.status === 'scheduled' ? `"${item.filename}" is scheduled.` : `"${item.filename}" was posted — upload completed.`);
+        handlePublishState(item.id, {
+          publishState: job.status,
+          publishedAt: Date.now(),
+          publishedPlatforms: meta.platforms || [],
+          publishError: job.error || null,
+        });
+      });
+      jobSubsRef.current.set(jobId, unsub);
+    }
+  }, [library, handlePublished, handlePublishState]);
 
   const updateQueueItem = useCallback((id, patch) => {
     setQueue((q) => q.map((item) => (item.id === id ? { ...item, ...patch } : item)));

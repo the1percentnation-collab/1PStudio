@@ -64,8 +64,9 @@ jobs:
             fi
           } > functions/.env
           # Storage rules are deployed manually from the console (the default
-          # bucket must be initialized first); CI deploys functions only.
-          firebase deploy --only functions --project onepstudio-9a3ef --force
+          # bucket must be initialized first). Firestore rules deploy here so
+          # the client can write publishJobs docs (server-side publishing).
+          firebase deploy --only functions,firestore --project onepstudio-9a3ef --force
 
       - name: Deploy to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0

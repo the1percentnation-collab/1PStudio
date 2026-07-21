@@ -11,6 +11,7 @@
 
 import { initializeApp } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
+import { getFirestore } from "firebase-admin/firestore";
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
@@ -168,6 +169,39 @@ async function main() {
   const ymax = m ? Number(m[1]) : -1;
   if (ymax < 200) fail(`no burned-in text detected (YMAX=${ymax}, expected >200 on black source)`);
   ok(`burned-in text verified in output pixels (YMAX=${ymax})`);
+
+  // 5) Server-side publish worker: create a real publishJobs doc and confirm
+  //    the Firestore-triggered worker picks it up and updates its status.
+  //    The spec deliberately has NOTHING to draw, so the worker fails the job
+  //    fast ("produced no burned-in text") BEFORE reaching Zernio — this
+  //    exercises trigger → worker → doc updates without posting anything.
+  const db = getFirestore();
+  const jobRef = db.collection("publishJobs").doc(`smoke-${randomUUID()}`);
+  await jobRef.set({
+    status: "queued",
+    mediaUrl: srcUrl,
+    post: "smoke test — never published",
+    title: "smoke",
+    platforms: ["tiktok"],
+    scheduleDate: null,
+    mediaType: "video",
+    filename: "smoke.mp4",
+    burnIn: true,
+    spec: { texts: [], captions: { enabled: false, lines: [] } },
+    createdAt: new Date(),
+  });
+  const jobDeadline = Date.now() + 3 * 60 * 1000;
+  let jobStatus = "queued";
+  while (Date.now() < jobDeadline) {
+    const snap = await jobRef.get();
+    jobStatus = snap.get("status");
+    if (jobStatus && jobStatus !== "queued" && jobStatus !== "rendering") break;
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  await jobRef.delete().catch(() => undefined);
+  if (jobStatus === "queued") fail("publish worker never picked up the job — Firestore trigger not firing");
+  if (jobStatus !== "failed") fail(`publish worker ended in unexpected status "${jobStatus}" (expected controlled failure)`);
+  ok("publish worker picked up the job and updated its status");
 
   console.log("\nAll smoke checks passed.");
 }

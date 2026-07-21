@@ -4,6 +4,7 @@
 // client bundle). They can be overridden via REACT_APP_FIREBASE_* env vars.
 import { initializeApp } from 'firebase/app';
 import { getStorage } from 'firebase/storage';
+import { getFirestore } from 'firebase/firestore';
 import { getAuth, signInAnonymously } from 'firebase/auth';
 
 const firebaseConfig = {
@@ -17,6 +18,7 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const storage = getStorage(app);
+export const db = getFirestore(app);
 const auth = getAuth(app);
 
 // Direct origin for the Cloud Functions, bypassing the Hosting /api proxy.
