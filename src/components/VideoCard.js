@@ -327,7 +327,7 @@ function TranscriptPanel({ onRegenerate, isRegenerating, initialTranscript, isPh
   );
 }
 
-export default function VideoCard({ result, onRegenerate, onRemove, onPublished, onEdit }) {
+export default function VideoCard({ result, onRegenerate, onRemove, onPublished, onPublishState, onEdit }) {
   const { id, filename, frames, content, error, _file, videoUrl, transcript, mediaType } = result;
   const isPhoto = mediaType === 'photo';
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -505,6 +505,8 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished,
             mediaType={mediaType}
             overlaySpec={result.overlaySpec}
             words={result.words}
+            itemId={id}
+            onPublishState={onPublishState}
           />
         )}
 

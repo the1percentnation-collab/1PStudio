@@ -220,6 +220,31 @@ export default function App() {
     setPosts((prev) => [record, ...prev]);
   }, []);
 
+  // Publishes run in the background now; the library item carries the live
+  // state (publishing → published/pending/failed) so the Library shows a
+  // badge, and terminal states surface an app-wide toast — the "you'll be
+  // notified" promise even when the publish panel is closed or off-screen.
+  const [toast, setToast] = useState(null); // { kind: 'ok'|'warn'|'error', message }
+  const toastTimer = useRef(null);
+  const handlePublishState = useCallback((id, patch) => {
+    if (id != null) {
+      setLibrary((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
+    }
+    const s = patch.publishState;
+    if (s === 'publishing') return;
+    const messages = {
+      published: { kind: 'ok', message: '✓ Video posted — upload completed.' },
+      scheduled: { kind: 'ok', message: '✓ Post scheduled.' },
+      pending: { kind: 'warn', message: '⏳ Post sent — open the Posts tab to confirm it went live.' },
+      failed: { kind: 'error', message: '✕ Posting failed — open the item to see why and retry.' },
+    };
+    const t = messages[s];
+    if (!t) return;
+    setToast(t);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 7000);
+  }, []);
+
   const updateQueueItem = useCallback((id, patch) => {
     setQueue((q) => q.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   }, []);
@@ -369,6 +394,7 @@ export default function App() {
           loadingId={libLoadingId}
           onLoadMedia={loadLibraryMedia}
           onPublished={handlePublished}
+          onPublishState={handlePublishState}
         />
       );
     }
@@ -427,6 +453,7 @@ export default function App() {
                 onRegenerate={handleRegenerate}
                 onRemove={handleRemove}
                 onPublished={handlePublished}
+                onPublishState={handlePublishState}
                 onEdit={handleEdit}
               />
             ))}
@@ -502,6 +529,32 @@ export default function App() {
           onClose={() => setShowTextCreator(false)}
           onCreate={(file) => handleFilesSelected([file])}
         />
+      )}
+
+      {/* publish completion toast — visible wherever the user is in the app */}
+      {toast && (
+        <div
+          onClick={() => setToast(null)}
+          style={{
+            position: 'fixed',
+            left: '50%',
+            bottom: isMobile ? 84 : 28,
+            transform: 'translateX(-50%)',
+            zIndex: 1000,
+            maxWidth: 'min(92vw, 480px)',
+            background: '#111',
+            border: `1px solid ${toast.kind === 'ok' ? '#00C48C' : toast.kind === 'warn' ? '#FFC107' : '#FF4444'}`,
+            color: toast.kind === 'ok' ? '#00C48C' : toast.kind === 'warn' ? '#FFC107' : '#FF4444',
+            borderRadius: 10,
+            padding: '10px 16px',
+            fontSize: 13,
+            lineHeight: 1.5,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+            cursor: 'pointer',
+          }}
+        >
+          {toast.message}
+        </div>
       )}
     </div>
   );

@@ -14,6 +14,35 @@ function hookScoreColor(score) {
   return '#FF4444';
 }
 
+const PUBLISH_BADGES = {
+  publishing: { label: 'POSTING…', color: '#7FB4FF' },
+  pending: { label: 'SENT — CHECK POSTS', color: '#FFC107' },
+  scheduled: { label: 'SCHEDULED', color: '#FFC107' },
+  published: { label: '✓ PUBLISHED', color: '#00C48C' },
+  failed: { label: 'POST FAILED', color: '#FF4444' },
+};
+
+function PublishBadge({ state }) {
+  const badge = PUBLISH_BADGES[state];
+  if (!badge) return null;
+  return (
+    <span style={{
+      background: `${badge.color}22`,
+      border: `1px solid ${badge.color}55`,
+      color: badge.color,
+      fontSize: 9,
+      fontWeight: 700,
+      letterSpacing: '0.08em',
+      padding: '2px 6px',
+      borderRadius: 4,
+      textTransform: 'uppercase',
+      whiteSpace: 'nowrap',
+    }}>
+      {badge.label}
+    </span>
+  );
+}
+
 function CopyBtn({ text }) {
   const [copied, setCopied] = useState(false);
   const handle = async (e) => {
@@ -82,7 +111,7 @@ function TitleRow({ title, index }) {
   );
 }
 
-function LibraryCard({ item, onDelete, onEdit, loading, onLoadMedia, onPublished }) {
+function LibraryCard({ item, onDelete, onEdit, loading, onLoadMedia, onPublished, onPublishState }) {
   const [expanded, setExpanded] = useState(false);
   const { filename, frames, content, transcript, error, dateAdded, mediaType, hasVideo } = item;
   const isPhoto = mediaType === 'photo';
@@ -123,6 +152,7 @@ function LibraryCard({ item, onDelete, onEdit, loading, onLoadMedia, onPublished
             {filename}
           </div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            <PublishBadge state={item.publishState} />
             {content && (
               <span style={{
                 background: `${pillarColor}22`,
@@ -254,6 +284,8 @@ function LibraryCard({ item, onDelete, onEdit, loading, onLoadMedia, onPublished
                 mediaType={mediaType}
                 overlaySpec={item.overlaySpec}
                 words={media.words}
+                itemId={item.id}
+                onPublishState={onPublishState}
               />
             </div>
           )}
@@ -286,7 +318,7 @@ function LibraryCard({ item, onDelete, onEdit, loading, onLoadMedia, onPublished
   );
 }
 
-export default function LibraryView({ library, onDelete, onEdit, loadingId, onLoadMedia, onPublished }) {
+export default function LibraryView({ library, onDelete, onEdit, loadingId, onLoadMedia, onPublished, onPublishState }) {
   if (library.length === 0) {
     return (
       <div style={{ textAlign: 'center', padding: '80px 24px', color: '#333' }}>
@@ -326,6 +358,7 @@ export default function LibraryView({ library, onDelete, onEdit, loadingId, onLo
           loading={loadingId === item.id}
           onLoadMedia={onLoadMedia}
           onPublished={onPublished}
+          onPublishState={onPublishState}
         />
       ))}
     </div>
