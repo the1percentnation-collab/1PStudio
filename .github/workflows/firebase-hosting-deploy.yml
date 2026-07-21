@@ -63,10 +63,12 @@ jobs:
               printf 'DEEPGRAM_API_KEY=%s\n' "$DEEPGRAM_CLEAN"
             fi
           } > functions/.env
-          # Storage rules are deployed manually from the console (the default
-          # bucket must be initialized first). Firestore rules deploy here so
-          # the client can write publishJobs docs (server-side publishing).
-          firebase deploy --only functions,firestore --project onepstudio-9a3ef --force
+          # Storage and Firestore rules are deployed manually from the console
+          # — the CI service account lacks the Firebase Rules Admin role, so a
+          # rules deploy here 403s and blocks the whole deploy (run 29795230954).
+          # The client needs firestore.rules live (authed read/write) for
+          # publishJobs docs; grant the role and add ",firestore" to re-enable.
+          firebase deploy --only functions --project onepstudio-9a3ef --force
 
       - name: Deploy to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
