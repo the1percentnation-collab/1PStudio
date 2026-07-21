@@ -8,6 +8,7 @@ import { getFirestore } from 'firebase/firestore';
 import {
   getAuth,
   GoogleAuthProvider,
+  signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
   onAuthStateChanged,
@@ -37,18 +38,43 @@ export const FUNCTIONS_ORIGIN = `https://us-central1-${firebaseConfig.projectId}
 
 // ---------------------------------------------------------------------------
 // Auth. Sign-in is real Google (not anonymous) so each user's API keys are
-// tied to a stable account and sync across devices. Redirect flow (not popup)
-// because popups are unreliable in iOS Safari, the primary client.
+// tied to a stable account and sync across devices.
+//
+// POPUP first, redirect only as a fallback. The app is served on
+// *.web.app, but Firebase's auth handler lives on *.firebaseapp.com — a
+// different domain. Modern browsers partition storage across those domains,
+// so signInWithRedirect returns from Google but the result is lost and the
+// user bounces back to the sign-in screen (a login loop). Popup passes the
+// credential back via postMessage and works cross-domain. Redirect is kept
+// for the rare environment where popups are blocked (some in-app browsers).
+//
 // Console prerequisite: Authentication -> Sign-in method -> enable Google.
 // ---------------------------------------------------------------------------
 const provider = new GoogleAuthProvider();
 
-// Completes a pending redirect sign-in on the load that returns from Google.
-// Safe to ignore errors here — onAuthStateChanged is the source of truth.
+// Completes a pending redirect sign-in (fallback path) on the load that
+// returns from Google. Ignore errors — onAuthStateChanged is the truth.
 export const redirectResult = getRedirectResult(auth).catch(() => null);
 
-export function signInWithGoogle() {
-  return signInWithRedirect(auth, provider);
+const POPUP_FALLBACK_CODES = new Set([
+  'auth/popup-blocked',
+  'auth/operation-not-supported-in-this-environment',
+  'auth/cancelled-popup-request',
+]);
+
+export async function signInWithGoogle() {
+  try {
+    await signInWithPopup(auth, provider);
+  } catch (e) {
+    // Popup was closed by the user — surface nothing to loop on.
+    if (e?.code === 'auth/popup-closed-by-user') return;
+    // Popup unavailable — fall back to redirect (navigates away).
+    if (POPUP_FALLBACK_CODES.has(e?.code)) {
+      await signInWithRedirect(auth, provider);
+      return;
+    }
+    throw e;
+  }
 }
 
 export function signOutUser() {
