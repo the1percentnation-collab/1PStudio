@@ -56,8 +56,18 @@ export function signOutUser() {
 }
 
 // Subscribe to auth state. Fires immediately with the current user (or null).
+// Legacy anonymous sessions (from before the app had login) are discarded so
+// the sign-in gate shows — otherwise a leftover anonymous user would satisfy
+// the gate and skip Google sign-in entirely. Google sign-in replaces it.
 export function watchAuth(cb) {
-  return onAuthStateChanged(auth, cb);
+  return onAuthStateChanged(auth, (user) => {
+    if (user && user.isAnonymous) {
+      signOut(auth).catch(() => {});
+      cb(null);
+      return;
+    }
+    cb(user);
+  });
 }
 
 export function currentUser() {
@@ -79,8 +89,9 @@ export async function getIdToken() {
 // app is gated behind sign-in, so by the time anything calls this a user
 // exists. Rejects if somehow called while signed out.
 export async function ensureAuth() {
-  if (auth.currentUser) return auth.currentUser;
+  const ok = (u) => u && !u.isAnonymous;
+  if (ok(auth.currentUser)) return auth.currentUser;
   await redirectResult;
-  if (auth.currentUser) return auth.currentUser;
+  if (ok(auth.currentUser)) return auth.currentUser;
   throw new Error('You’re signed out — sign in to continue.');
 }

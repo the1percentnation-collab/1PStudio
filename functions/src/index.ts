@@ -78,6 +78,28 @@ async function resolveUserKeysByUid(uid: string | undefined): Promise<ResolvedKe
   return keysFromDoc(uid ? await readUserConfig(uid) : undefined);
 }
 
+// App-level admins. Keep in sync with ADMIN_EMAILS in src/services/admin.js.
+const ADMIN_EMAILS = new Set(["the1percentnation@gmail.com"]);
+
+// Verify the Bearer ID token belongs to an admin; throw JobError otherwise.
+async function requireAdmin(req: Request): Promise<void> {
+  const header = req.get("authorization") || req.get("Authorization") || "";
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  if (!match) throw new JobError(401, "Sign in to continue.");
+  let email = "";
+  let verified = false;
+  try {
+    const decoded = await getAuth().verifyIdToken(match[1]);
+    email = (decoded.email || "").toLowerCase();
+    verified = decoded.email_verified === true;
+  } catch {
+    throw new JobError(401, "Your session expired — sign in again.");
+  }
+  if (!verified || !ADMIN_EMAILS.has(email)) {
+    throw new JobError(403, "Admin access only.");
+  }
+}
+
 function buildSystemPrompt(isPhoto: boolean): string {
   const media = isPhoto ? "TikTok photo post" : "TikTok video";
   const sourceLine = isPhoto
@@ -1278,6 +1300,51 @@ export const publishJobWorker = onDocumentCreated(
         error: e instanceof Error ? e.message : "Publish job failed.",
         completedAt: FieldValue.serverTimestamp(),
       }).catch(() => undefined);
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Admin — recent publish activity across all users. Admin-only (verified
+// server-side); reads publishJobs via the Admin SDK (bypasses owner-scoped
+// rules). Returns lightweight status rows only — never any API keys (those
+// live in userConfig, which this does not touch).
+// ---------------------------------------------------------------------------
+export const adminRecentJobs = onRequest(
+  {
+    cors: true,
+    timeoutSeconds: 30,
+    memory: "256MiB",
+  },
+  async (req, res) => {
+    try {
+      await requireAdmin(req);
+    } catch (e) {
+      const code = e instanceof JobError ? e.code : 500;
+      res.status(code).json({ error: e instanceof Error ? e.message : "Not authorized." });
+      return;
+    }
+    try {
+      const snap = await getFirestore()
+        .collection("publishJobs")
+        .orderBy("createdAt", "desc")
+        .limit(50)
+        .get();
+      const jobs = snap.docs.map((d) => {
+        const j = d.data() as PublishJobDoc & { createdAt?: { toMillis?: () => number }; error?: string };
+        return {
+          id: d.id,
+          ownerUid: j.ownerUid ?? null,
+          filename: (j as { filename?: string }).filename ?? "",
+          status: j.status ?? "queued",
+          platforms: Array.isArray(j.platforms) ? j.platforms : [],
+          error: j.error ?? null,
+          createdAt: j.createdAt?.toMillis ? j.createdAt.toMillis() : null,
+        };
+      });
+      res.json({ jobs });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : "Failed to load activity." });
     }
   }
 );

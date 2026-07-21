@@ -543,7 +543,7 @@ export default function App() {
       </div>
     );
   }
-  if (!authUser) {
+  if (!authUser || authUser.isAnonymous) {
     return <SignInGate />;
   }
 
