@@ -179,6 +179,7 @@ async function main() {
   const jobRef = db.collection("publishJobs").doc(`smoke-${randomUUID()}`);
   await jobRef.set({
     status: "queued",
+    ownerUid: "smoke",
     mediaUrl: srcUrl,
     post: "smoke test — never published",
     title: "smoke",

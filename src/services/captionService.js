@@ -2,6 +2,7 @@
 // (Deepgram) and burn word-synced captions into the video with ffmpeg.
 import { uploadVideo } from './socialService';
 import { FUNCTIONS_ORIGIN } from './firebase';
+import { authHeaders } from './userKeys';
 
 export const CAPTION_STYLES = [
   { id: 'bold', label: 'Bold', desc: 'Big all-caps, thick outline' },
@@ -14,6 +15,7 @@ export async function renderCaptions(videoFile, style, onProgress) {
 
   const mediaUrl = await uploadVideo(videoFile, onProgress);
   const body = JSON.stringify({ mediaUrl, style });
+  const headers = { 'Content-Type': 'application/json', ...(await authHeaders()) };
 
   // Call the function's own URL: the Hosting /api proxy kills responses at
   // 60s, far too short for transcribe + ffmpeg on a real video. Fall back to
@@ -22,13 +24,13 @@ export async function renderCaptions(videoFile, style, onProgress) {
   try {
     response = await fetch(`${FUNCTIONS_ORIGIN}/captionVideo`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body,
     });
   } catch {
     response = await fetch('/api/caption', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body,
     });
   }

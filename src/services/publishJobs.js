@@ -8,7 +8,7 @@
 // Job doc statuses: 'queued' → 'rendering' → 'publishing' →
 //                   'published' | 'scheduled' | 'failed'
 import { collection, doc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
-import { db, ensureAuth } from './firebase';
+import { db, ensureAuth, currentUid } from './firebase';
 import { uploadVideo } from './socialService';
 
 export const TERMINAL_JOB_STATES = ['published', 'scheduled', 'failed'];
@@ -34,6 +34,10 @@ export async function startPublishJob(mediaFile, { post, title, platforms, sched
   const jobRef = doc(collection(db, 'publishJobs'));
   await setDoc(jobRef, {
     status: 'queued',
+    // The worker resolves this user's Zernio key from userConfig/{ownerUid};
+    // owner-scoped Firestore rules also require it on create. The key itself
+    // never touches the job doc.
+    ownerUid: currentUid(),
     mediaUrl,
     post,
     title: title || '',

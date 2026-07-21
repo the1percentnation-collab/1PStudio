@@ -1,4 +1,5 @@
 import { uploadVideo } from './socialService';
+import { authHeaders } from './userKeys';
 
 // Transcribes an uploaded video via the Deepgram-backed function. Returns
 // { text, words } where words is [{ w, s, e }] (word, start/end seconds) —
@@ -7,7 +8,7 @@ import { uploadVideo } from './socialService';
 async function transcribeVideo(mediaUrl) {
   const res = await fetch('/api/transcribe', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
     body: JSON.stringify({ mediaUrl }),
   });
   const data = await res.json().catch(() => ({}));
@@ -158,6 +159,7 @@ export async function generateTikTokContent(file, onProgress, transcript = '') {
   // Network-level failures (iOS Safari's bare "Load failed") get retried —
   // a single dropped connection shouldn't kill the whole generation.
   const body = JSON.stringify({ frames, transcript: finalTranscript, filename: file.name, mediaType });
+  const headers = { 'Content-Type': 'application/json', ...(await authHeaders()) };
   let response = null;
   let netErr = null;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -168,7 +170,7 @@ export async function generateTikTokContent(file, onProgress, transcript = '') {
     try {
       response = await fetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body,
       });
       netErr = null;

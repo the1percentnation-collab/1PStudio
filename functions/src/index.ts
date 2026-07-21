@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, getFirestore } from "firebase-admin/firestore";
+import { getAuth } from "firebase-admin/auth";
 import { onRequest } from "firebase-functions/v2/https";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { randomUUID } from "crypto";
@@ -8,6 +9,7 @@ import { spawn } from "child_process";
 import { promises as fs } from "fs";
 import * as os from "os";
 import * as path from "path";
+import type { Request } from "firebase-functions/v2/https";
 
 initializeApp();
 
@@ -19,6 +21,61 @@ class JobError extends Error {
     super(message);
     this.code = code;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Per-user API keys. Each key is the caller's own, supplied in the Settings
+// tab and stored at userConfig/{uid} in Firestore. HTTP endpoints identify
+// the caller from a verified Firebase ID token; the background publish worker
+// uses the job's ownerUid. Every key falls back to the server env var, so a
+// user who hasn't set one (or an unauthenticated legacy call) still works if
+// the server has that env configured.
+// ---------------------------------------------------------------------------
+interface ResolvedKeys {
+  anthropic: string;
+  zernio: string;
+  zernioProfile: string;
+  deepgram: string;
+}
+
+function keysFromDoc(data: Record<string, unknown> | undefined): ResolvedKeys {
+  const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  return {
+    anthropic: s(data?.anthropicApiKey) || (process.env.ANTHROPIC_API_KEY ?? ""),
+    zernio: s(data?.zernioApiKey) || (process.env.ZERNIO_API_KEY ?? ""),
+    zernioProfile: s(data?.zernioProfileId) || (process.env.ZERNIO_PROFILE_ID ?? ""),
+    deepgram: s(data?.deepgramApiKey) || (process.env.DEEPGRAM_API_KEY ?? ""),
+  };
+}
+
+async function readUserConfig(uid: string): Promise<Record<string, unknown> | undefined> {
+  try {
+    const snap = await getFirestore().collection("userConfig").doc(uid).get();
+    return snap.exists ? (snap.data() as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Resolve keys for an HTTP request: verify the Bearer ID token (if present),
+// load that user's keys, env fallback per key. No/invalid token → env only.
+async function resolveUserKeys(req: Request): Promise<ResolvedKeys> {
+  const header = req.get("authorization") || req.get("Authorization") || "";
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  if (match) {
+    try {
+      const decoded = await getAuth().verifyIdToken(match[1]);
+      return keysFromDoc(await readUserConfig(decoded.uid));
+    } catch {
+      // Invalid/expired token — fall through to env-only.
+    }
+  }
+  return keysFromDoc(undefined);
+}
+
+// Resolve keys for the background worker, which already knows the job owner.
+async function resolveUserKeysByUid(uid: string | undefined): Promise<ResolvedKeys> {
+  return keysFromDoc(uid ? await readUserConfig(uid) : undefined);
 }
 
 function buildSystemPrompt(isPhoto: boolean): string {
@@ -71,9 +128,9 @@ export const analyzeVideo = onRequest(
       return;
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const apiKey = (await resolveUserKeys(req)).anthropic;
     if (!apiKey) {
-      res.status(500).json({ error: "Server configuration error: ANTHROPIC_API_KEY is not set" });
+      res.status(500).json({ error: "No Anthropic API key — add yours in Settings (or set the server key)." });
       return;
     }
 
@@ -204,6 +261,10 @@ interface PublishBody {
   platforms?: string[];
   scheduleDate?: string;
   mediaType?: string;
+  // The publisher's own Zernio credentials, threaded in by the caller
+  // (resolveUserKeys for the endpoint, resolveUserKeysByUid for the worker).
+  apiKey?: string;
+  profileId?: string;
 }
 
 interface ZernioAccount {
@@ -265,10 +326,11 @@ function zernioError(data: Record<string, unknown>): string | null {
   return null;
 }
 
-// Which Zernio profile to operate on. Pinned via ZERNIO_PROFILE_ID, else the
-// first profile on the account. Returns null if the key has no profiles.
-async function resolveProfileId(apiKey: string): Promise<string | null> {
-  const pinned = process.env.ZERNIO_PROFILE_ID;
+// Which Zernio profile to operate on. Pinned via the caller's profile id
+// (Settings / ZERNIO_PROFILE_ID), else the first profile on the account.
+// Returns null if the key has no profiles.
+async function resolveProfileId(apiKey: string, pinnedProfileId?: string): Promise<string | null> {
+  const pinned = (pinnedProfileId ?? "").trim();
   if (pinned) return pinned;
   const {ok, data} = await zernioFetch("/profiles", apiKey);
   if (!ok) return null;
@@ -311,8 +373,8 @@ async function listZernioAccounts(
 // clients) and the background publish worker. Throws JobError on anything
 // that should stop the publish.
 async function performZernioPublish(input: PublishBody): Promise<{ mediaUrl: string; skipped: string[]; ayrshare: unknown }> {
-  const apiKey = process.env.ZERNIO_API_KEY;
-  if (!apiKey) throw new JobError(500, "ZERNIO_API_KEY is not configured on the server.");
+  const apiKey = (input.apiKey ?? "").trim() || (process.env.ZERNIO_API_KEY ?? "");
+  if (!apiKey) throw new JobError(400, "No Zernio API key — add yours in Settings to post.");
 
   const { mediaUrl, post, title: rawTitle, platforms: rawPlatforms, scheduleDate, mediaType } = input;
   const isPhoto = mediaType === "photo";
@@ -334,7 +396,7 @@ async function performZernioPublish(input: PublishBody): Promise<{ mediaUrl: str
 
   try {
     // Resolve the profile, then map each requested platform to its account.
-    const profileId = await resolveProfileId(apiKey);
+    const profileId = await resolveProfileId(apiKey, input.profileId);
     if (!profileId) {
       throw new JobError(400, "No Zernio profile is set up for this API key. Create one and connect accounts in the Zernio dashboard.");
     }
@@ -408,7 +470,9 @@ export const publishPost = onRequest(
       return;
     }
     try {
-      const result = await performZernioPublish((req.body ?? {}) as PublishBody);
+      const keys = await resolveUserKeys(req);
+      const body = { ...((req.body ?? {}) as PublishBody), apiKey: keys.zernio, profileId: keys.zernioProfile };
+      const result = await performZernioPublish(body);
       res.json({ status: "ok", ...result });
     } catch (e) {
       const code = e instanceof JobError ? e.code : 500;
@@ -429,15 +493,16 @@ export const accountsStatus = onRequest(
     timeoutSeconds: 30,
     memory: "256MiB",
   },
-  async (_req, res) => {
-    const apiKey = process.env.ZERNIO_API_KEY;
+  async (req, res) => {
+    const keys = await resolveUserKeys(req);
+    const apiKey = keys.zernio;
     if (!apiKey) {
       res.status(200).json({ configured: false, connected: [], displayNames: [] });
       return;
     }
 
     try {
-      const profileId = await resolveProfileId(apiKey);
+      const profileId = await resolveProfileId(apiKey, keys.zernioProfile);
       if (!profileId) {
         res.status(200).json({ configured: true, connected: [], displayNames: [], error: "No Zernio profile found for this API key." });
         return;
@@ -514,15 +579,16 @@ export const postHistory = onRequest(
     timeoutSeconds: 30,
     memory: "256MiB",
   },
-  async (_req, res) => {
-    const apiKey = process.env.ZERNIO_API_KEY;
+  async (req, res) => {
+    const keys = await resolveUserKeys(req);
+    const apiKey = keys.zernio;
     if (!apiKey) {
       res.status(200).json({ configured: false, posts: [] });
       return;
     }
 
     try {
-      const profileId = await resolveProfileId(apiKey);
+      const profileId = await resolveProfileId(apiKey, keys.zernioProfile);
       const path = profileId ? `/posts?profileId=${encodeURIComponent(profileId)}` : "/posts";
       const { ok, status, data } = await zernioFetch(path, apiKey);
 
@@ -719,9 +785,9 @@ export const captionVideo = onRequest(
       return;
     }
 
-    const deepgramKey = process.env.DEEPGRAM_API_KEY;
+    const deepgramKey = (await resolveUserKeys(req)).deepgram;
     if (!deepgramKey) {
-      res.status(500).json({ error: "DEEPGRAM_API_KEY is not configured on the server." });
+      res.status(500).json({ error: "No Deepgram API key — add yours in Settings (or set the server key)." });
       return;
     }
 
@@ -1144,6 +1210,9 @@ interface PublishJobDoc {
   mediaType?: string;
   burnIn?: boolean;
   spec?: OverlaySpec | null;
+  // The publisher's uid — the worker looks up their Zernio key from
+  // userConfig/{ownerUid}. The key itself is never stored on the job doc.
+  ownerUid?: string;
 }
 
 export const publishJobWorker = onDocumentCreated(
@@ -1180,6 +1249,7 @@ export const publishJobWorker = onDocumentCreated(
       }
 
       await patch({ status: "publishing", finalMediaUrl: mediaUrl });
+      const keys = await resolveUserKeysByUid(job.ownerUid);
       const out = await performZernioPublish({
         mediaUrl,
         post: job.post,
@@ -1187,6 +1257,8 @@ export const publishJobWorker = onDocumentCreated(
         platforms: job.platforms,
         scheduleDate: job.scheduleDate ?? undefined,
         mediaType: job.mediaType,
+        apiKey: keys.zernio,
+        profileId: keys.zernioProfile,
       });
 
       // Only Firestore-safe scalars go on the doc (the raw Zernio payload can
@@ -1228,7 +1300,7 @@ export const transcribeAudio = onRequest(
       return;
     }
 
-    const deepgramKey = process.env.DEEPGRAM_API_KEY;
+    const deepgramKey = (await resolveUserKeys(req)).deepgram;
     if (!deepgramKey) {
       res.status(200).json({ transcript: "", words: [], configured: false });
       return;
@@ -1409,13 +1481,14 @@ export const selectClips = onRequest(
     const minSec = Math.max(5, rawMin ?? 15);
     const maxSec = Math.max(minSec + 5, rawMax ?? 60);
 
+    const apiKey = (await resolveUserKeys(req)).anthropic;
+
     if (words.length === 0) {
       // Nothing to clip without speech timings.
-      res.status(200).json({ clips: [], configured: !!process.env.ANTHROPIC_API_KEY, reason: "no-speech" });
+      res.status(200).json({ clips: [], configured: !!apiKey, reason: "no-speech" });
       return;
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       res.status(200).json({ clips: fallbackClips(words, clipCount, minSec, maxSec), configured: false });
       return;

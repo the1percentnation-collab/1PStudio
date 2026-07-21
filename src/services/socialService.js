@@ -9,6 +9,7 @@
 // platforms is an array of: 'tiktok' | 'instagram' | 'youtube' | 'facebook' | 'x' | 'linkedin'
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { storage, ensureAuth } from './firebase';
+import { authHeaders } from './userKeys';
 
 export const SOCIAL_PLATFORMS = [
   { id: 'tiktok', label: 'TikTok' },
@@ -49,7 +50,7 @@ export async function uploadVideo(videoFile, onProgress) {
 // Fetches normalized post history from Zernio via the postHistory function.
 // Returns { configured, posts: [{id, status, caption, platforms, mediaUrls, date, errors}], error? }
 export async function getPostHistory() {
-  const response = await fetch('/api/history');
+  const response = await fetch('/api/history', { headers: await authHeaders() });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data?.error || `Failed to load history (${response.status})`);
@@ -59,7 +60,7 @@ export async function getPostHistory() {
 
 // Fetches which social accounts are connected in Zernio.
 export async function getConnectedAccounts() {
-  const response = await fetch('/api/accounts');
+  const response = await fetch('/api/accounts', { headers: await authHeaders() });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data?.error || `Failed to load accounts (${response.status})`);
