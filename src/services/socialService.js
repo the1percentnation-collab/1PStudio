@@ -26,25 +26,48 @@ export async function uploadVideo(videoFile, onProgress) {
   await ensureAuth();
 
   const safeName = videoFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const path = `social-posts/${Date.now()}-${safeName}`;
-  const task = uploadBytesResumable(ref(storage, path), videoFile, {
-    contentType: videoFile.type || 'video/mp4',
-  });
 
-  await new Promise((resolve, reject) => {
-    task.on(
-      'state_changed',
-      (snap) => {
-        if (onProgress && snap.totalBytes) {
-          onProgress(snap.bytesTransferred / snap.totalBytes);
-        }
-      },
-      reject,
-      resolve
+  // A resumable upload can die outright (the whole session drops) on a flaky
+  // mobile connection — the SDK's internal chunk retries can't resurrect a dead
+  // session. Retry the upload once from scratch before surfacing an error.
+  let lastErr = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0 && onProgress) onProgress(0); // reset the bar for the retry
+    // Fresh path per attempt so a partially-written object is never reused.
+    const path = `social-posts/${Date.now()}-${safeName}`;
+    const task = uploadBytesResumable(ref(storage, path), videoFile, {
+      contentType: videoFile.type || 'video/mp4',
+    });
+
+    try {
+      await new Promise((resolve, reject) => {
+        task.on(
+          'state_changed',
+          (snap) => {
+            if (onProgress && snap.totalBytes) {
+              onProgress(snap.bytesTransferred / snap.totalBytes);
+            }
+          },
+          reject,
+          resolve
+        );
+      });
+      return getDownloadURL(task.snapshot.ref);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+
+  // Give the common failure a message the user can act on instead of the raw
+  // Firebase code.
+  const code = lastErr?.code || '';
+  if (code === 'storage/retry-limit-exceeded' || code === 'storage/canceled') {
+    throw new Error(
+      'The upload kept dropping — this is usually a slow or unstable connection with a large video. ' +
+        'Try Wi-Fi or a shorter / lower-resolution clip, then tap Post again.'
     );
-  });
-
-  return getDownloadURL(task.snapshot.ref);
+  }
+  throw lastErr || new Error('Upload failed — please try again.');
 }
 
 // Fetches normalized post history from Zernio via the postHistory function.
