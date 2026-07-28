@@ -26,6 +26,13 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const storage = getStorage(app);
+
+// Large 4K iPhone clips uploaded over cellular routinely take longer than the
+// Firebase SDK's default 2-minute retry window, which then surfaces on "Post"
+// as `storage/retry-limit-exceeded` and nothing publishes. Give slow / flaky
+// connections much more room before the SDK gives up on a stalled chunk.
+storage.maxUploadRetryTime = 10 * 60 * 1000; // 10 min (default 2 min)
+storage.maxOperationRetryTime = 5 * 60 * 1000; // 5 min (default 2 min)
 export const db = getFirestore(app);
 const auth = getAuth(app);
 
