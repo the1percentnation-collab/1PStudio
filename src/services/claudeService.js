@@ -1,22 +1,43 @@
+// Per-seek timeout. Some clips (phone .mov / HEVC especially) never fire the
+// 'seeked' event, so we must not wait on it forever — resolve null instead.
+const SEEK_TIMEOUT_MS = 4000;
+// Overall guard: if metadata never loads or extraction stalls, give up so the
+// pipeline can continue with whatever frames it has (or none).
+const EXTRACT_TIMEOUT_MS = 15000;
+
 function extractFrameAt(video, pct) {
   return new Promise((resolve) => {
-    const targetTime = video.duration * pct;
-    video.currentTime = targetTime;
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      video.removeEventListener('seeked', onSeeked);
+      clearTimeout(timer);
+      resolve(value);
+    };
 
     const onSeeked = () => {
-      video.removeEventListener('seeked', onSeeked);
       try {
         const canvas = document.createElement('canvas');
         canvas.width = video.videoWidth || 640;
         canvas.height = video.videoHeight || 360;
         canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', 0.75).split(',')[1]);
+        finish(canvas.toDataURL('image/jpeg', 0.75).split(',')[1]);
       } catch {
-        resolve(null);
+        finish(null);
       }
     };
 
+    // If the seek never completes, don't block forever.
+    const timer = setTimeout(() => finish(null), SEEK_TIMEOUT_MS);
+
     video.addEventListener('seeked', onSeeked);
+
+    try {
+      video.currentTime = (video.duration || 0) * pct;
+    } catch {
+      finish(null);
+    }
   });
 }
 
@@ -28,22 +49,35 @@ export async function extractFramesFromVideo(videoFile) {
     video.muted = true;
     video.playsInline = true;
 
+    let settled = false;
+    const finish = (frames) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(guard);
+      URL.revokeObjectURL(url);
+      resolve(frames);
+    };
+
+    // Absolute backstop: if neither onloadedmetadata nor onerror ever fires
+    // (or a seek stalls past its own timeout), we still resolve.
+    const guard = setTimeout(
+      () => finish({ hookFrame: null, midFrame: null, endFrame: null }),
+      EXTRACT_TIMEOUT_MS
+    );
+
     video.onloadedmetadata = async () => {
       try {
         const hookFrame = await extractFrameAt(video, 0.04);
         const midFrame  = await extractFrameAt(video, 0.45);
         const endFrame  = await extractFrameAt(video, 0.85);
-        URL.revokeObjectURL(url);
-        resolve({ hookFrame, midFrame, endFrame });
+        finish({ hookFrame, midFrame, endFrame });
       } catch {
-        URL.revokeObjectURL(url);
-        resolve({ hookFrame: null, midFrame: null, endFrame: null });
+        finish({ hookFrame: null, midFrame: null, endFrame: null });
       }
     };
 
     video.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve({ hookFrame: null, midFrame: null, endFrame: null });
+      finish({ hookFrame: null, midFrame: null, endFrame: null });
     };
 
     video.src = url;
