@@ -297,19 +297,38 @@ interface ZernioAccount {
 }
 
 // Thin Zernio fetch wrapper: attaches auth + JSON headers, parses the body.
+// Per-request ceiling for a single Zernio call. Node's fetch has no default
+// timeout, so without this a hung/slow Zernio endpoint blocks the whole job
+// until the function's 540s hard kill — which skips the catch and leaves the
+// job stuck on "publishing" (the app shows "POSTING…") forever. Bounding each
+// call turns a hang into a clean, caught error the job records as "failed".
+const ZERNIO_TIMEOUT_MS = 120000; // 120s — generous; /posts normally replies in seconds
+
 async function zernioFetch(
   path: string,
   apiKey: string,
   init?: RequestInit,
 ): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
-  const r = await fetch(`${ZERNIO_API}${path}`, {
-    ...init,
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
+  let r: Response;
+  try {
+    r = await fetch(`${ZERNIO_API}${path}`, {
+      ...init,
+      signal: init?.signal ?? AbortSignal.timeout(ZERNIO_TIMEOUT_MS),
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch (e) {
+    const name = (e as { name?: string })?.name;
+    if (name === "TimeoutError" || name === "AbortError") {
+      throw new JobError(504,
+        `Zernio didn't respond within ${ZERNIO_TIMEOUT_MS / 1000}s (${path}). It may be busy — try posting again.`);
+    }
+    throw new JobError(502,
+      `Couldn't reach Zernio (${path}): ${(e as Error)?.message || "network error"}`);
+  }
   const data = (await r.json().catch(() => ({}))) as Record<string, unknown>;
   return {ok: r.ok, status: r.status, data};
 }
@@ -1257,7 +1276,19 @@ export const publishJobWorker = onDocumentCreated(
     const patch = (p: Record<string, unknown>) =>
       snap.ref.set({ ...p, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
 
+    // Hard ceiling below the 540s function timeout. A hard timeout kill runs
+    // no catch — which is exactly what leaves a job stuck on "publishing" /
+    // "rendering" forever (the app shows "POSTING…" with no error). Racing the
+    // work against a deadline guarantees a terminal "failed" status instead.
+    const WORKER_DEADLINE_MS = 500000; // ~500s
+
     try {
+      await Promise.race([
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new JobError(504,
+            "Posting took too long and was stopped. Try a shorter clip, or tap post again.")),
+          WORKER_DEADLINE_MS)),
+        (async () => {
       let mediaUrl = String(job.mediaUrl ?? "");
       if (!/^https?:\/\//.test(mediaUrl)) throw new JobError(400, "Job has no valid media URL.");
 
@@ -1294,6 +1325,8 @@ export const publishJobWorker = onDocumentCreated(
         skippedPlatforms: out.skipped ?? [],
         completedAt: FieldValue.serverTimestamp(),
       });
+        })(),
+      ]);
     } catch (e) {
       await patch({
         status: "failed",
