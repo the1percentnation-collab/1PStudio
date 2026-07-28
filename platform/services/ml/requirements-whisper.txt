@@ -1,0 +1,3 @@
+# Optional real-ASR backend. Install (or build the image with WITH_WHISPER=1)
+# to replace the deterministic mock transcriber with faster-whisper.
+faster-whisper==1.1.0

@@ -1,0 +1,24 @@
+{
+  "name": "@onepct/orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx src/worker.ts",
+    "start": "node dist/worker.js"
+  },
+  "dependencies": {
+    "@onepct/db": "workspace:*",
+    "@onepct/shared": "workspace:*",
+    "@temporalio/activity": "^1.11.5",
+    "@temporalio/client": "^1.11.5",
+    "@temporalio/worker": "^1.11.5",
+    "@temporalio/workflow": "^1.11.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  }
+}

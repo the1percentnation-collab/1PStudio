@@ -1,0 +1,21 @@
+{
+  "name": "@onepct/platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "1P Clip — OpusClip-class AI video repurposing platform (monorepo root)",
+  "scripts": {
+    "build": "pnpm -r --filter './packages/**' --filter './services/**' --filter './apps/**' build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "db:migrate": "pnpm --filter @onepct/db migrate:deploy",
+    "db:seed": "pnpm --filter @onepct/db seed"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "tsx": "^4.19.0",
+    "@temporalio/client": "^1.11.5",
+    "@onepct/db": "workspace:*",
+    "@onepct/shared": "workspace:*"
+  },
+  "packageManager": "pnpm@10.33.0"
+}

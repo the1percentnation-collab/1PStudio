@@ -1,0 +1,7 @@
+packages:
+  - "packages/*"
+  - "services/api"
+  - "services/orchestrator"
+  - "services/render"
+  - "services/mcp"
+  - "apps/*"

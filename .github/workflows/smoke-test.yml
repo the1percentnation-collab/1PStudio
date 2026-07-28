@@ -1,0 +1,49 @@
+name: Production Smoke Test
+
+# Verifies the LIVE deployment end-to-end after every deploy (and on demand):
+# hosting, social endpoints, and the full burn-in render pipeline — including
+# a pixel check that on-screen text/captions are actually in the output video.
+
+on:
+  workflow_dispatch:
+  # Re-run whenever the test itself changes (also forces workflow registration).
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/smoke-test.yml'
+      - 'functions/scripts/smoke-test.mjs'
+  # After every production deploy.
+  workflow_run:
+    workflows: ["Deploy to Firebase"]
+    types: [completed]
+  # Daily health check — catches breakage between deploys (vendor API changes,
+  # expired keys) instead of waiting for a real post to fail.
+  schedule:
+    - cron: '0 13 * * *'
+
+jobs:
+  smoke:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install functions dependencies (firebase-admin)
+        run: |
+          cd functions
+          npm ci
+
+      - name: Run production smoke test
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          echo "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/sa.json
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json
+          node functions/scripts/smoke-test.mjs

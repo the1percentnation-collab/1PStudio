@@ -1,0 +1,65 @@
+# CI for the platform monorepo only. Path-filtered so it never runs for (and
+# never interferes with) the original CRA + Firebase app, which keeps its own
+# workflow in firebase-hosting-deploy.yml.
+name: Platform CI
+
+on:
+  push:
+    paths:
+      - "platform/**"
+      - ".github/workflows/platform-ci.yml"
+  pull_request:
+    paths:
+      - "platform/**"
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: platform
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: platform/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Consumers resolve @onepct/shared and @onepct/db via their built dist/,
+      # so the workspace libraries must be built (and Prisma generated) before
+      # any service is typechecked.
+      - name: Build workspace libraries
+        run: pnpm --filter @onepct/shared build && pnpm --filter @onepct/db build
+
+      - name: Typecheck all packages
+        run: pnpm -r typecheck
+
+      - name: Unit tests
+        run: pnpm --filter @onepct/shared test
+
+      - name: Build web app
+        run: pnpm --filter @onepct/web build
+
+  ml-service:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: platform/services/ml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Import check
+        run: python -c "from app.main import app; print('ml ok')"

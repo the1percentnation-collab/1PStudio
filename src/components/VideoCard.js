@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
+import PublishPanel from './PublishPanel';
 
 const PILLAR_COLORS = {
-  'Self-Sabotage & Limiting Beliefs': '#E60306',
+  'Self-Sabotage & Limiting Beliefs': '#E63329',
   'Accountability & Execution': '#FF6B00',
   'Identity & Mindset Shift': '#9B59B6',
   'Leadership & Purpose': '#2980B9',
@@ -73,12 +74,88 @@ function ContentField({ label, value, mono }) {
   );
 }
 
-function FrameStrip({ frames }) {
-  const available = [
-    { label: 'HOOK', data: frames?.hookFrame },
-    { label: 'MID', data: frames?.midFrame },
-    { label: 'END', data: frames?.endFrame },
-  ].filter((f) => f.data);
+function VideoPreview({ url, filename }) {
+  if (!url) return null;
+  return (
+    <div style={{ padding: '0 16px 14px' }}>
+      <video
+        src={url}
+        controls
+        playsInline
+        preload="metadata"
+        aria-label={`Preview of ${filename}`}
+        style={{
+          width: '100%',
+          maxHeight: 420,
+          borderRadius: 10,
+          background: '#000',
+          display: 'block',
+        }}
+      />
+    </div>
+  );
+}
+
+function TranscriptView({ transcript, isPhoto }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!transcript) return null;
+
+  const isLong = transcript.length > 220;
+  const shown = expanded || !isLong ? transcript : `${transcript.slice(0, 220).trimEnd()}…`;
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', color: '#666', textTransform: 'uppercase' }}>
+          {isPhoto ? 'NOTES' : 'TRANSCRIPT'}
+        </span>
+        <CopyButton text={transcript} small />
+      </div>
+      <div
+        style={{
+          background: '#0A0A0A',
+          border: '1px solid #1A1A1A',
+          borderRadius: 8,
+          padding: '10px 12px',
+          fontSize: 12,
+          color: '#999',
+          lineHeight: 1.6,
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      >
+        {shown}
+        {isLong && (
+          <button
+            onClick={() => setExpanded((e) => !e)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#E63329',
+              fontSize: 12,
+              cursor: 'pointer',
+              padding: 0,
+              marginLeft: 6,
+            }}
+          >
+            {expanded ? 'Show less' : 'Show more'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FrameStrip({ frames, isPhoto }) {
+  const available = (
+    isPhoto
+      ? [{ label: 'PHOTO', data: frames?.hookFrame }]
+      : [
+          { label: 'HOOK', data: frames?.hookFrame },
+          { label: 'MID', data: frames?.midFrame },
+          { label: 'END', data: frames?.endFrame },
+        ]
+  ).filter((f) => f.data);
 
   if (available.length === 0) return null;
 
@@ -97,7 +174,7 @@ function FrameStrip({ frames }) {
               top: 6,
               left: 6,
               background: 'rgba(0,0,0,0.7)',
-              color: label === 'HOOK' ? '#E60306' : '#888',
+              color: label === 'HOOK' || label === 'PHOTO' ? '#E63329' : '#888',
               fontSize: 9,
               fontWeight: 700,
               letterSpacing: '0.1em',
@@ -162,14 +239,15 @@ function TitleOptions({ titles }) {
   );
 }
 
-function TranscriptPanel({ onRegenerate, isRegenerating }) {
+function TranscriptPanel({ onRegenerate, isRegenerating, initialTranscript, isPhoto }) {
   const [open, setOpen] = useState(false);
   const [transcript, setTranscript] = useState('');
+  const noun = isPhoto ? 'Notes' : 'Transcript';
 
   if (!open) {
     return (
       <button
-        onClick={() => setOpen(true)}
+        onClick={() => { setTranscript(initialTranscript || ''); setOpen(true); }}
         style={{
           background: 'transparent',
           border: '1px dashed #333',
@@ -183,7 +261,7 @@ function TranscriptPanel({ onRegenerate, isRegenerating }) {
         onMouseEnter={(e) => { e.currentTarget.style.color = '#AAA'; e.currentTarget.style.borderColor = '#555'; }}
         onMouseLeave={(e) => { e.currentTarget.style.color = '#666'; e.currentTarget.style.borderColor = '#333'; }}
       >
-        + Add Transcript
+        {initialTranscript ? `Edit ${noun}` : `+ Add ${noun}`}
       </button>
     );
   }
@@ -191,7 +269,9 @@ function TranscriptPanel({ onRegenerate, isRegenerating }) {
   return (
     <div style={{ width: '100%', marginTop: 4 }}>
       <textarea
-        placeholder="Paste your video transcript here for more accurate titles, hooks, and captions…"
+        placeholder={isPhoto
+          ? 'Add notes or the photo’s message here for more accurate titles, hooks, and captions…'
+          : 'Paste your video transcript here for more accurate titles, hooks, and captions…'}
         value={transcript}
         onChange={(e) => setTranscript(e.target.value)}
         rows={4}
@@ -215,7 +295,7 @@ function TranscriptPanel({ onRegenerate, isRegenerating }) {
           onClick={() => onRegenerate(transcript)}
           disabled={isRegenerating || !transcript.trim()}
           style={{
-            background: '#E60306',
+            background: '#E63329',
             color: '#FFF',
             fontSize: 13,
             fontWeight: 600,
@@ -226,7 +306,7 @@ function TranscriptPanel({ onRegenerate, isRegenerating }) {
             transition: 'opacity 0.2s',
           }}
         >
-          {isRegenerating ? 'Regenerating…' : 'Regenerate with Transcript'}
+          {isRegenerating ? 'Regenerating…' : `Regenerate with ${noun}`}
         </button>
         <button
           onClick={() => { setOpen(false); setTranscript(''); }}
@@ -247,8 +327,9 @@ function TranscriptPanel({ onRegenerate, isRegenerating }) {
   );
 }
 
-export default function VideoCard({ result, onRegenerate, onRemove }) {
-  const { id, filename, frames, content, error } = result;
+export default function VideoCard({ result, onRegenerate, onRemove, onPublished, onPublishState, onEdit }) {
+  const { id, filename, frames, content, error, _file, videoUrl, transcript, mediaType } = result;
+  const isPhoto = mediaType === 'photo';
   const [isRegenerating, setIsRegenerating] = useState(false);
   const pillarColor = content ? (PILLAR_COLORS[content.content_pillar] || '#888') : '#888';
 
@@ -316,15 +397,18 @@ export default function VideoCard({ result, onRegenerate, onRemove }) {
         </div>
       </div>
 
-      {/* FRAME STRIP — hook screenshot + mid + end, all downloadable */}
-      <FrameStrip frames={frames} />
+      {/* VIDEO PREVIEW — playable copy of the uploaded file (videos only) */}
+      {!isPhoto && <VideoPreview url={videoUrl} filename={filename} />}
+
+      {/* FRAME STRIP — hook screenshot + mid + end (or single photo), all downloadable */}
+      <FrameStrip frames={frames} isPhoto={isPhoto} />
 
       {/* CONTENT FIELDS */}
       {content && (
         <div style={{ padding: '4px 16px 12px' }}>
           {/* PRIMARY FIELDS — transcript-driven */}
           {content.best_title && (
-            <ContentField label="BEST VIDEO TITLE" value={content.best_title} mono />
+            <ContentField label={isPhoto ? 'BEST POST TITLE' : 'BEST VIDEO TITLE'} value={content.best_title} mono />
           )}
           {content.on_screen_text && (
             <ContentField label="ON-SCREEN TEXT" value={content.on_screen_text} mono />
@@ -352,8 +436,10 @@ export default function VideoCard({ result, onRegenerate, onRemove }) {
             </div>
           )}
           {content.video_description && (
-            <ContentField label="VIDEO DESCRIPTION" value={content.video_description} />
+            <ContentField label={isPhoto ? 'POST DESCRIPTION' : 'VIDEO DESCRIPTION'} value={content.video_description} />
           )}
+
+          <TranscriptView transcript={transcript} isPhoto={isPhoto} />
 
           <div style={{ borderTop: '1px solid #1A1A1A', margin: '14px 0' }} />
 
@@ -374,7 +460,7 @@ export default function VideoCard({ result, onRegenerate, onRemove }) {
               lineHeight: 1.5,
               marginBottom: 14,
             }}>
-              <span style={{ color: '#E60306', fontWeight: 600 }}>Tip: </span>
+              <span style={{ color: '#E63329', fontWeight: 600 }}>Tip: </span>
               {content.hook_score_reason}
             </div>
           )}
@@ -393,7 +479,7 @@ export default function VideoCard({ result, onRegenerate, onRemove }) {
           <button
             onClick={() => navigator.clipboard.writeText(buildAllText()).catch(() => {})}
             style={{
-              background: '#E60306',
+              background: '#E63329',
               color: '#FFF',
               fontSize: 13,
               fontWeight: 600,
@@ -406,6 +492,42 @@ export default function VideoCard({ result, onRegenerate, onRemove }) {
             onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}
           >
             Copy All
+          </button>
+        )}
+
+        {content && (
+          <PublishPanel
+            videoFile={_file}
+            content={content}
+            onPublished={onPublished}
+            filename={filename}
+            thumbnail={frames?.hookFrame}
+            mediaType={mediaType}
+            overlaySpec={result.overlaySpec}
+            words={result.words}
+            itemId={id}
+            onPublishState={onPublishState}
+          />
+        )}
+
+        {!isPhoto && videoUrl && onEdit && (
+          <button
+            onClick={() => onEdit(id)}
+            style={{
+              background: '#1A1A1A',
+              color: '#FFF',
+              fontSize: 13,
+              fontWeight: 600,
+              padding: '8px 16px',
+              borderRadius: 8,
+              border: '1px solid #333',
+              cursor: 'pointer',
+              transition: 'border-color 0.2s',
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#E63329')}
+            onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#333')}
+          >
+            ✂️ Edit Video
           </button>
         )}
 
@@ -424,13 +546,13 @@ export default function VideoCard({ result, onRegenerate, onRemove }) {
             opacity: isRegenerating ? 0.5 : 1,
             transition: 'border-color 0.2s',
           }}
-          onMouseEnter={(e) => !isRegenerating && (e.currentTarget.style.borderColor = '#E60306')}
+          onMouseEnter={(e) => !isRegenerating && (e.currentTarget.style.borderColor = '#E63329')}
           onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#333')}
         >
           Regenerate
         </button>
 
-        <TranscriptPanel onRegenerate={handleRegenerate} isRegenerating={isRegenerating} />
+        <TranscriptPanel onRegenerate={handleRegenerate} isRegenerating={isRegenerating} initialTranscript={transcript} isPhoto={isPhoto} />
 
         <button
           onClick={() => onRemove(id)}

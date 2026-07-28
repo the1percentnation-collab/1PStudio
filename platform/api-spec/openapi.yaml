@@ -1,0 +1,247 @@
+openapi: 3.1.0
+info:
+  title: 1P Clip API
+  version: 0.1.0
+  description: |
+    OpusClip-class AI video repurposing platform. One contract for the web app,
+    SDKs, and the MCP server. Auth: workspace API key as `Authorization: Bearer <key>`.
+    Every heavy operation is asynchronous — POST /v1/videos returns 202 with a
+    projectId to poll.
+servers:
+  - url: http://localhost:3001
+    description: local docker-compose stack
+security:
+  - bearerAuth: []
+paths:
+  /v1/uploads:
+    post:
+      summary: Get a presigned PUT URL for direct file upload
+      operationId: createUpload
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                filename: { type: string }
+                contentType: { type: string, default: video/mp4 }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  uploadKey: { type: string, description: "pass to POST /v1/videos" }
+                  url: { type: string, description: presigned PUT URL }
+                  method: { type: string, enum: [PUT] }
+  /v1/videos:
+    post:
+      summary: Submit a video to the clipping pipeline
+      operationId: clipVideo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url: { type: string, description: YouTube or public video URL }
+                uploadKey: { type: string, description: key from /v1/uploads }
+                title: { type: string }
+                estimatedDurationSec: { type: number, default: 600 }
+                options: { $ref: "#/components/schemas/PipelineOptions" }
+      responses:
+        "202":
+          description: pipeline started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  projectId: { type: string }
+                  jobId: { type: string }
+                  workflowId: { type: string }
+                  estimate: { type: integer, description: preflighted credit cost }
+                  balance: { type: integer }
+        "402": { description: insufficient credits }
+  /v1/projects:
+    get:
+      summary: List projects
+      operationId: listProjects
+      responses:
+        "200": { description: projects with latest pipeline job status }
+  /v1/projects/{id}:
+    get:
+      summary: Get a project with per-stage pipeline status
+      operationId: getProject
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: project }
+        "404": { description: not found }
+  /v1/projects/{id}/clips:
+    get:
+      summary: List a project's clips ranked by virality
+      operationId: listClips
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  clips:
+                    type: array
+                    items: { $ref: "#/components/schemas/Clip" }
+  /v1/clips/{id}:
+    get:
+      summary: Get a clip with EDL, captions, renders, metadata
+      operationId: getClip
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: clip detail }
+  /v1/clips/{id}/edl:
+    patch:
+      summary: Edit a clip's EDL (declarative) — re-renders only, never re-runs the pipeline
+      operationId: patchEdl
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ops: { type: array, items: { $ref: "#/components/schemas/EditOp" } }
+                captionLines: { type: array, items: { type: object } }
+                resolution: { type: string, enum: [R720, R1080, R4K], default: R1080 }
+      responses:
+        "202": { description: re-render queued with bumped editVersion }
+        "422": { description: EDL contains a priced-but-stubbed op (broll/voiceover/dub/intro/outro) }
+  /v1/clips/{id}/exports/premiere-xml:
+    get:
+      summary: Export the clip's edit decision as Premiere/Resolve XML
+      operationId: exportPremiereXml
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: xmeml document, content-type application/xml }
+  /v1/clips/{id}/metadata:
+    post:
+      summary: Generate brand-voice content metadata (titles, caption, hashtags, hook score)
+      operationId: generateMetadata
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ContentMetadata" }
+  /v1/clips/{id}/publish:
+    post:
+      summary: Schedule a clip for a social platform (metadata prefilled when omitted)
+      operationId: publishClip
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [platform]
+              properties:
+                platform: { type: string, enum: [TIKTOK, YOUTUBE, INSTAGRAM, X] }
+                title: { type: string }
+                description: { type: string }
+                hashtags: { type: string }
+                scheduledAt: { type: string, format: date-time }
+      responses:
+        "201": { description: publication created (stays SCHEDULED until a platform OAuth connection is wired) }
+  /v1/publications:
+    get:
+      summary: List scheduled/drafted publications
+      operationId: listPublications
+      responses:
+        "200": { description: publications }
+  /v1/credits/balance:
+    get:
+      summary: Credit balance + plan
+      operationId: creditBalance
+      responses:
+        "200": { description: balance }
+  /v1/credits/ledger:
+    get:
+      summary: Append-only credit ledger (auditable per-stage charges)
+      operationId: creditLedger
+      responses:
+        "200": { description: ledger entries }
+  /v1/credits/estimate:
+    get:
+      summary: ROI / cost calculator (reads the same rates the pipeline meters)
+      operationId: creditEstimate
+      parameters:
+        - { name: durationSec, in: query, schema: { type: number } }
+        - { name: clipCount, in: query, schema: { type: integer } }
+        - { name: resolution, in: query, schema: { type: string, enum: [R720, R1080, R4K] } }
+      responses:
+        "200": { description: estimate + rate card }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, description: workspace API key or session JWT }
+  schemas:
+    PipelineOptions:
+      type: object
+      properties:
+        clipCount: { type: integer, minimum: 1, maximum: 10, default: 5 }
+        lengthBucket: { type: string, enum: ["0-30s", "30-60s", "1-3m", "3-5m"], default: "30-60s" }
+        aspectRatios: { type: array, items: { type: string, enum: ["9:16", "1:1", "16:9"] }, default: ["9:16"] }
+        resolution: { type: string, enum: [R720, R1080, R4K], default: R1080 }
+        clipWindow:
+          type: object
+          properties: { startSec: { type: number }, endSec: { type: number } }
+        prompt: { type: string, description: prompt-to-clip natural-language guidance }
+        removeFillers: { type: boolean, default: false }
+        brandTemplateId: { type: string }
+        language: { type: string }
+    Clip:
+      type: object
+      properties:
+        id: { type: string }
+        startSec: { type: number }
+        endSec: { type: number }
+        title: { type: string }
+        viralityScore: { type: number, description: 0-100 }
+        viralityBreakdown:
+          type: object
+          properties:
+            hook: { type: number }
+            flow: { type: number }
+            value: { type: number }
+            trend: { type: number }
+        viralityReason: { type: string }
+        status: { type: string, enum: [SELECTED, PROCESSING, READY, FAILED] }
+        renders: { type: array, items: { type: object } }
+    EditOp:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [trim, removeFiller, cropPath, captionBurn, watermark, textOverlay, music, transition, broll, voiceover, dub, intro, outro]
+      description: Declarative edit op — see packages/shared/src/edl.ts for exact variants.
+    ContentMetadata:
+      type: object
+      description: The 14-field 1P Studio content-strategy contract.
+      properties:
+        best_title: { type: string }
+        on_screen_text: { type: string }
+        niche: { type: string }
+        thumbnail_text: { type: string }
+        video_description: { type: string }
+        headline: { type: string }
+        seo_opener: { type: string }
+        caption: { type: string }
+        hashtags: { type: string }
+        content_pillar: { type: string }
+        hook_score: { type: number }
+        hook_score_reason: { type: string }
+        titles: { type: array, items: { type: string } }
+        transcript_summary: { type: string }
