@@ -1,0 +1,52 @@
+name: Uptime Check
+
+# Pings the live site + AI endpoint on a schedule. Runs on GitHub's network
+# (not the sandboxed dev environment), so it can actually reach the site.
+# A failed run notifies repo members per their GitHub Actions notification
+# settings (email by default).
+
+on:
+  schedule:
+    # Every 5 minutes (GitHub's minimum; scheduled runs may be delayed under load).
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check homepage is up
+        run: |
+          URL="https://onepstudio-9a3ef.web.app"
+          echo "Checking $URL"
+          # Retry a few times so a single transient blip doesn't page anyone.
+          for attempt in 1 2 3; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$URL" || echo 000)
+            echo "Attempt $attempt: HTTP $code"
+            if [ "$code" = "200" ]; then
+              echo "Homepage OK"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Homepage $URL is DOWN (last HTTP $code)"
+          exit 1
+
+      - name: Check AI endpoint (Cloud Function) is alive
+        run: |
+          # A GET hits the analyzeVideo function, which returns 405 for non-POST.
+          # 405 means the function is deployed and responding. 404/5xx means it's
+          # missing or erroring, which is what breaks content generation.
+          URL="https://onepstudio-9a3ef.web.app/api/analyze"
+          echo "Checking $URL"
+          for attempt in 1 2 3; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$URL" || echo 000)
+            echo "Attempt $attempt: HTTP $code"
+            if [ "$code" = "405" ] || [ "$code" = "200" ]; then
+              echo "AI endpoint alive (HTTP $code)"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::AI endpoint $URL is not responding correctly (last HTTP $code) — content generation is likely broken"
+          exit 1

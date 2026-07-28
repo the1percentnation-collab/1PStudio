@@ -52,13 +52,19 @@ export default function DropZone({ onFilesSelected, processing }) {
     setDragging(false);
   };
 
+  // Accept anything the browser tags as video/* or image/*, but also fall back
+  // to the file extension — phone-recorded clips (.mov/.hevc) and some photos
+  // often arrive with an empty or non-standard MIME type and would otherwise be
+  // silently dropped.
+  const MEDIA_EXT = /\.(mp4|mov|m4v|webm|avi|mkv|hevc|3gp|mpeg|mpg|qt|jpg|jpeg|png|gif|webp|heic|heif)$/i;
+  const isMediaFile = (f) =>
+    f.type.startsWith('video/') || f.type.startsWith('image/') || MEDIA_EXT.test(f.name);
+
   const handleDrop = (e) => {
     e.preventDefault();
     setDragging(false);
     if (processing) return;
-    const files = Array.from(e.dataTransfer.files).filter((f) =>
-      f.type.startsWith('video/') || f.type.startsWith('image/')
-    );
+    const files = Array.from(e.dataTransfer.files).filter(isMediaFile);
     if (files.length > 0) onFilesSelected(files.slice(0, 20));
   };
 
