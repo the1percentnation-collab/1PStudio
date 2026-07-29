@@ -1193,16 +1193,32 @@ async function performOverlayRender(
     const clipStart = clip ? Number(clip.start) : 0;
     const clipDur = clip ? Math.max(0, Number(clip.end) - clipStart) : 0;
 
-    const { ass, count } = buildOverlayAss(spec, width, height, duration || 3600, clipStart);
+    // Cap the render at 1080p on the long edge. A 4K iPhone clip otherwise
+    // makes the ffmpeg decode+encode blow past the worker's memory budget — an
+    // OOM kill is instant, so it runs no catch and no deadline timer, leaving
+    // the job stuck on "POSTING…" forever. 1080p already exceeds what any social
+    // platform serves. Positions in the spec are fractional, so building the ASS
+    // at the scaled size keeps the burned-in text aligned.
+    const MAX_EDGE = 1920;
+    const longEdge = Math.max(width, height) || MAX_EDGE;
+    const scaleF = longEdge > MAX_EDGE ? MAX_EDGE / longEdge : 1;
+    const sw = Math.max(2, Math.round((width * scaleF) / 2) * 2);
+    const sh = Math.max(2, Math.round((height * scaleF) / 2) * 2);
+
+    const { ass, count } = buildOverlayAss(spec, sw, sh, duration || 3600, clipStart);
     if (count === 0) return { videoUrl, rendered: false };
     await fs.writeFile(assPath, ass);
+
+    const vf = scaleF < 1
+      ? `scale=${sw}:${sh}:flags=bicubic,subtitles=${assPath}:fontsdir=${fontsDir}`
+      : `subtitles=${assPath}:fontsdir=${fontsDir}`;
 
     const args = ["-y"];
     if (clip && clipDur > 0) args.push("-ss", String(clipStart), "-t", String(clipDur));
     args.push(
       "-i", inputPath,
       ...mapArgs(meta),
-      "-vf", `subtitles=${assPath}:fontsdir=${fontsDir}`,
+      "-vf", vf,
       "-c:v", "libx264",
       "-preset", "veryfast",
       "-pix_fmt", "yuv420p",
@@ -1260,7 +1276,7 @@ export const publishJobWorker = onDocumentCreated(
   {
     document: "publishJobs/{jobId}",
     timeoutSeconds: 540,
-    memory: "2GiB",
+    memory: "4GiB",
     cpu: 2,
     concurrency: 1,
     retry: false,
