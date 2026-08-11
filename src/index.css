@@ -59,9 +59,20 @@ textarea {
   resize: none;
 }
 
+select {
+  outline: none;
+  font-family: 'DM Sans', sans-serif;
+}
+
 a {
   color: inherit;
   text-decoration: none;
+}
+
+/* Teleprompter scroll area — hide the scrollbar, the text is the interface */
+.teleprompter-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 @keyframes spin {

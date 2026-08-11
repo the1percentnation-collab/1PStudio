@@ -26,7 +26,43 @@ async function transcribeVideo(mediaUrl) {
   };
 }
 
-function extractFrameAt(video, pct) {
+// Files written by MediaRecorder (in-app recordings) report a duration of
+// Infinity until the element has been seeked past the end, so metadata alone
+// isn't enough to work out where the mid/end frames live. Resolves 0 when the
+// duration can't be determined at all.
+function resolveDuration(video) {
+  return new Promise((resolve) => {
+    if (Number.isFinite(video.duration) && video.duration > 0) {
+      resolve(video.duration);
+      return;
+    }
+
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      video.removeEventListener('timeupdate', onTimeUpdate);
+      resolve(value);
+    };
+
+    const onTimeUpdate = () => {
+      if (Number.isFinite(video.duration) && video.duration > 0) finish(video.duration);
+      else if (video.currentTime > 0 && Number.isFinite(video.currentTime)) finish(video.currentTime);
+    };
+
+    const timer = setTimeout(() => finish(0), SEEK_TIMEOUT_MS);
+    video.addEventListener('timeupdate', onTimeUpdate);
+
+    try {
+      video.currentTime = 1e101; // forces the browser to compute the real duration
+    } catch {
+      finish(0);
+    }
+  });
+}
+
+function extractFrameAt(video, time) {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (value) => {
@@ -61,7 +97,7 @@ function extractFrameAt(video, pct) {
     video.addEventListener('seeked', onSeeked);
 
     try {
-      video.currentTime = (video.duration || 0) * pct;
+      video.currentTime = time;
     } catch {
       finish(null);
     }
@@ -94,9 +130,16 @@ export async function extractFramesFromVideo(videoFile) {
 
     video.onloadedmetadata = async () => {
       try {
-        const hookFrame = await extractFrameAt(video, 0.04);
-        const midFrame  = await extractFrameAt(video, 0.45);
-        const endFrame  = await extractFrameAt(video, 0.85);
+        const duration = await resolveDuration(video);
+
+        // Without a usable duration we can still grab an opening frame.
+        const times = duration > 0
+          ? [0.04, 0.45, 0.85].map((pct) => Math.min(duration * pct, Math.max(duration - 0.05, 0)))
+          : [0.1, null, null];
+
+        const hookFrame = await extractFrameAt(video, times[0]);
+        const midFrame = times[1] === null ? null : await extractFrameAt(video, times[1]);
+        const endFrame = times[2] === null ? null : await extractFrameAt(video, times[2]);
         finish({ hookFrame, midFrame, endFrame });
       } catch {
         finish({ hookFrame: null, midFrame: null, endFrame: null });

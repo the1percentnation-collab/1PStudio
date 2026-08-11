@@ -12,6 +12,7 @@ import Analytics from './components/Analytics';
 import AccountsView from './components/AccountsView';
 import CaptionsView from './components/CaptionsView';
 import ClipsView from './components/ClipsView';
+import Recorder from './components/Recorder';
 import DropZone from './components/DropZone';
 import VideoCard from './components/VideoCard';
 import QueueProgress from './components/QueueProgress';
@@ -69,6 +70,7 @@ function saveJSON(key, items) {
 const VIEW_META = {
   dashboard: { title: 'Dashboard', subtitle: 'Your content at a glance' },
   composer: { title: 'Composer', subtitle: 'Generate and publish content' },
+  record: { title: 'Record', subtitle: 'Camera + built-in teleprompter' },
   clips: { title: 'Clips', subtitle: 'Turn one long video into viral clips' },
   captions: { title: 'Captions', subtitle: 'Auto burned-in subtitles' },
   calendar: { title: 'Content Calendar', subtitle: 'Scheduled & published posts' },
@@ -366,7 +368,7 @@ export default function App() {
   );
 
   const handleFilesSelected = useCallback(
-    async (files) => {
+    async (files, transcript = '') => {
       const items = files.map((file) => ({
         id: uid(),
         file,
@@ -378,11 +380,22 @@ export default function App() {
       setQueue((prev) => [...prev, ...items]);
       setProcessing(true);
       for (const item of items) {
-        await processFile(item);
+        await processFile(item, transcript);
       }
       setProcessing(false);
     },
     [processFile]
+  );
+
+  // A take from the Record view goes through the same pipeline as an upload,
+  // with the teleprompter script used as the transcript (so it skips
+  // re-transcription and Claude grades what was actually scripted).
+  const handleUseRecording = useCallback(
+    async (file, transcript) => {
+      setView('composer');
+      await handleFilesSelected([file], transcript || '');
+    },
+    [handleFilesSelected]
   );
 
   const handleRegenerate = useCallback(
@@ -429,7 +442,7 @@ export default function App() {
 
   const isQueueActive = queue.some((i) => i.status === 'waiting' || i.status === 'processing');
   const meta = VIEW_META[view];
-  const contentMax = view === 'composer' ? 860 : 1120;
+  const contentMax = view === 'composer' || view === 'record' ? 860 : 1120;
 
   const renderView = () => {
     if (view === 'dashboard') {
@@ -440,6 +453,9 @@ export default function App() {
     }
     if (view === 'posts') {
       return <PostsView posts={posts} onNavigate={setView} onRefresh={syncPosts} syncState={syncState} isMobile={isMobile} />;
+    }
+    if (view === 'record') {
+      return <Recorder onUseRecording={handleUseRecording} busy={processing} />;
     }
     if (view === 'clips') {
       return <ClipsView onPublished={handlePublished} onSaveToLibrary={addToLibrary} />;

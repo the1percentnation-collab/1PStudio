@@ -41,6 +41,29 @@ The app opens at `http://localhost:3000`.
 5. Use **Copy All**, **Regenerate**, or **Remove** per card
 6. Click **Export CSV** to download all results
 
+## Recording in the app (Record tab)
+
+The **Record** view captures video straight from your camera with a teleprompter
+scrolling over the live preview — no separate recording app or prompter needed.
+
+1. Open **Record** and allow camera/microphone access
+2. Write or paste your script in the **Teleprompter** panel; tune **speed**,
+   **text size**, and **dim**. **Mirror text** is there for beam-splitter rigs
+3. Pick your camera, mic, and frame (9:16 / 1:1 / 16:9). Mirroring the preview
+   never flips the recorded file
+4. Hit **Record** — a 3-2-1 countdown runs, then the script starts scrolling
+   automatically. Pause/resume mid-take; the timer excludes paused time
+5. On **Stop**, review the take, then **Download**, **Retake**, or
+   **Generate Content**
+
+**Generate Content** sends the take through the same pipeline as an upload, with
+your teleprompter script attached as the transcript — so Claude grades what you
+actually scripted and the clip skips re-transcription.
+
+Recording happens entirely in the browser (`MediaRecorder`, WebM where
+supported, MP4 on Safari), requires `https://` or `localhost`, and auto-stops at
+10 minutes since the take is held in memory.
+
 ## Posting to Social Media (TikTok, IG Reels, YouTube Shorts, Facebook, X, LinkedIn)
 
 1P Studio can publish a video + its Claude-generated caption straight to your
@@ -124,6 +147,7 @@ git push -u origin main
 ## Tech Stack
 
 - React 18 (Create React App)
+- `getUserMedia` + `MediaRecorder` for in-app recording
 - Anthropic Claude API (`claude-opus-4-5`)
 - Firebase Hosting
 - Pure CSS-in-JS inline styles (no UI library dependencies)

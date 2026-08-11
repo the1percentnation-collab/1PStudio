@@ -35,6 +35,13 @@ const ICONS = {
       <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
     </>
   ),
+  record: (
+    <>
+      <path d="m23 7-7 5 7 5V7z" />
+      <rect x="1" y="5" width="15" height="14" rx="2" />
+      <circle cx="8.5" cy="12" r="3" />
+    </>
+  ),
   clips: (
     <>
       <rect x="2" y="4" width="20" height="16" rx="2" />
@@ -120,6 +127,7 @@ function Icon({ name }) {
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
   { id: 'composer', label: 'Composer', icon: 'composer' },
+  { id: 'record', label: 'Record', icon: 'record' },
   { id: 'clips', label: 'Clips', icon: 'clips' },
   { id: 'captions', label: 'Captions', icon: 'captions' },
   { id: 'calendar', label: 'Calendar', icon: 'calendar' },
