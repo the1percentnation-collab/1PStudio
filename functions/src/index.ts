@@ -23,6 +23,17 @@ class JobError extends Error {
   }
 }
 
+// A timeout on POST /posts is *ambiguous*, not a failure: the abort happens on
+// our side, so Zernio may have accepted the post and be mid-fan-out. Treating
+// it as failed told the user to "try posting again", which duplicates the post
+// on every connected platform. Distinguishing it lets the publish path check
+// what actually happened before deciding.
+class ZernioTimeoutError extends JobError {
+  constructor(message: string) {
+    super(504, message);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Per-user API keys. Each key is the caller's own, supplied in the Settings
 // tab and stored at userConfig/{uid} in Firestore. HTTP endpoints identify
@@ -302,18 +313,30 @@ interface ZernioAccount {
 // until the function's 540s hard kill — which skips the catch and leaves the
 // job stuck on "publishing" (the app shows "POSTING…") forever. Bounding each
 // call turns a hang into a clean, caught error the job records as "failed".
-const ZERNIO_TIMEOUT_MS = 120000; // 120s — generous; /posts normally replies in seconds
+// Lookups (/profiles, /accounts, GET /posts) are small JSON reads that answer
+// in well under a second. A low ceiling keeps a stalled lookup from eating the
+// budget the publish itself needs, and stays under the 30s function timeout on
+// accountsStatus/postHistory so the timeout surfaces as a clean error rather
+// than a hard function kill.
+const ZERNIO_TIMEOUT_MS = 25000;
+// POST /posts is a different shape of work: Zernio ingests the media from the
+// URL we hand it and fans out to every selected platform before it answers, so
+// a burned-in 1080p render going to five platforms legitimately takes minutes.
+// 120s was cutting that off mid-flight. Worst case here (25 + 25 + 240) still
+// leaves room under the worker's 500s deadline for the render that precedes it.
+const ZERNIO_PUBLISH_TIMEOUT_MS = 240000;
 
 async function zernioFetch(
   path: string,
   apiKey: string,
-  init?: RequestInit,
+  init?: RequestInit & { timeoutMs?: number },
 ): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
+  const { timeoutMs = ZERNIO_TIMEOUT_MS, ...fetchInit } = init ?? {};
   let r: Response;
   try {
     r = await fetch(`${ZERNIO_API}${path}`, {
-      ...init,
-      signal: init?.signal ?? AbortSignal.timeout(ZERNIO_TIMEOUT_MS),
+      ...fetchInit,
+      signal: fetchInit.signal ?? AbortSignal.timeout(timeoutMs),
       headers: {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
@@ -323,8 +346,8 @@ async function zernioFetch(
   } catch (e) {
     const name = (e as { name?: string })?.name;
     if (name === "TimeoutError" || name === "AbortError") {
-      throw new JobError(504,
-        `Zernio didn't respond within ${ZERNIO_TIMEOUT_MS / 1000}s (${path}). It may be busy — try posting again.`);
+      throw new ZernioTimeoutError(
+        `Zernio didn't respond within ${timeoutMs / 1000}s (${path}).`);
     }
     throw new JobError(502,
       `Couldn't reach Zernio (${path}): ${(e as Error)?.message || "network error"}`);
@@ -378,6 +401,60 @@ async function resolveProfileId(apiKey: string, pinnedProfileId?: string): Promi
   const first = asArray(data, "profiles", "data", "items")[0];
   const id = first?.id ?? first?.profileId ?? first?._id;
   return id ? String(id) : null;
+}
+
+// `checked: false` means post history itself was unreachable — the outcome is
+// unknown, which is a different answer from "checked, and it isn't there".
+type MediaLookup =
+  | { checked: true; item: Record<string, unknown> | null }
+  | { checked: false };
+
+// Did a post for this exact media actually land, despite the timeout? The
+// media URL is unique per publish (the burn-in render writes
+// rendered/{jobId}.mp4 with a fresh token), so matching it against post
+// history answers definitively — no guessing from timing alone.
+async function findPostByMedia(
+  apiKey: string,
+  profileId: string | null,
+  mediaUrl: string,
+): Promise<MediaLookup> {
+  // The object path ("rendered/<jobId>.mp4" or the upload's path) survives any
+  // re-hosting or query-string rewriting Zernio does to the URL we sent.
+  const objectPath = (() => {
+    try {
+      const m = new URL(mediaUrl).pathname.match(/\/o\/(.+)$/);
+      return m ? decodeURIComponent(m[1]) : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  const matches = (item: Record<string, unknown>) => {
+    const rawMedia = Array.isArray(item.mediaItems) ? item.mediaItems
+      : Array.isArray(item.mediaUrls) ? item.mediaUrls
+        : Array.isArray(item.media) ? item.media
+          : [];
+    return rawMedia.some((m) => {
+      const u = typeof m === "string" ? m : String((m as Record<string, unknown>)?.url ?? "");
+      if (!u) return false;
+      return u === mediaUrl || (objectPath !== null && u.includes(objectPath));
+    });
+  };
+
+  const path = profileId ? `/posts?profileId=${encodeURIComponent(profileId)}` : "/posts";
+  // A post accepted right as we gave up may take a moment to appear in
+  // history, so a single empty read isn't proof of absence. Only report
+  // "checked" once a lookup actually succeeds.
+  let anyLookupSucceeded = false;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 5000));
+    const { ok, data } = await zernioFetch(path, apiKey).catch(() => ({ ok: false, data: {} }));
+    if (!ok) continue;
+    anyLookupSucceeded = true;
+    const hit = asArray(data, "posts", "data", "items", "history").find(matches);
+    if (hit) return { checked: true, item: hit };
+  }
+  return anyLookupSucceeded ? { checked: true, item: null } : { checked: false };
 }
 
 // List a profile's connected accounts, normalized to our app's platform ids.
@@ -480,10 +557,31 @@ async function performZernioPublish(input: PublishBody): Promise<{ mediaUrl: str
       body.publishNow = true;
     }
 
-    const { ok, status, data } = await zernioFetch("/posts", apiKey, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    let ok: boolean;
+    let status: number;
+    let data: Record<string, unknown>;
+    try {
+      ({ ok, status, data } = await zernioFetch("/posts", apiKey, {
+        method: "POST",
+        body: JSON.stringify(body),
+        timeoutMs: ZERNIO_PUBLISH_TIMEOUT_MS,
+      }));
+    } catch (e) {
+      if (!(e instanceof ZernioTimeoutError)) throw e;
+      // We stopped waiting — that says nothing about what Zernio did. Ask post
+      // history before reporting an outcome, so a post that actually went out
+      // is never reported as failed (which would prompt a duplicate retry).
+      const lookup = await findPostByMedia(apiKey, profileId, mediaUrl)
+        .catch((): MediaLookup => ({ checked: false }));
+      if (lookup.checked && lookup.item) {
+        return { mediaUrl, skipped, ayrshare: lookup.item };
+      }
+      throw new JobError(504, lookup.checked ?
+        "Zernio took too long to accept this post, and post history shows it never registered — " +
+          "nothing was published. Safe to try again." :
+        "Zernio took too long to accept this post, and post history couldn't be reached to confirm " +
+          "the outcome. Check the Posts tab before retrying — posting again could publish it twice.");
+    }
 
     if (!ok) {
       // Surface Zernio's real reason instead of hiding it behind a status.
@@ -502,7 +600,10 @@ async function performZernioPublish(input: PublishBody): Promise<{ mediaUrl: str
 export const publishPost = onRequest(
   {
     cors: true,
-    timeoutSeconds: 120,
+    // Must outlast the publish call it wraps (ZERNIO_PUBLISH_TIMEOUT_MS plus
+    // the post-timeout history check), otherwise the function is killed first
+    // and the caller gets an opaque 500 instead of a described outcome.
+    timeoutSeconds: 540,
     memory: "256MiB",
   },
   async (req, res) => {
@@ -1302,7 +1403,8 @@ export const publishJobWorker = onDocumentCreated(
       await Promise.race([
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new JobError(504,
-            "Posting took too long and was stopped. Try a shorter clip, or tap post again.")),
+            "Posting took too long and was stopped. If the publish had already started, it may " +
+            "still go out — check the Posts tab before trying again, then retry with a shorter clip.")),
           WORKER_DEADLINE_MS)),
         (async () => {
       let mediaUrl = String(job.mediaUrl ?? "");
