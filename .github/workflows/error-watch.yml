@@ -59,7 +59,11 @@ jobs:
   # database credentials.
   diagnose:
     needs: watch
-    if: needs.watch.result == 'failure'
+    # always() is REQUIRED. Without a status function in the condition, GitHub
+    # applies an implicit success() to needed jobs and skips this one the moment
+    # watch fails — which is exactly and only when it needs to run. The first
+    # real run filed 9 issues and then skipped the diagnosis.
+    if: ${{ always() && needs.watch.result == 'failure' }}
     runs-on: ubuntu-latest
     # One diagnosis at a time — never let two sessions work the same issue.
     concurrency:
