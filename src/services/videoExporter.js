@@ -2,7 +2,7 @@
 // in real time, composites frames + overlays on a canvas, and records the
 // canvas stream with MediaRecorder. Export duration ≈ video duration.
 
-import { drawOverlays, ensureFontsLoaded } from './overlayRenderer';
+import { drawOverlays, ensureFontsLoaded, filterToCss } from './overlayRenderer';
 
 const MIME_CANDIDATES = [
   { mime: 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', ext: 'mp4', label: 'MP4 · H.264' },
@@ -69,9 +69,28 @@ export function exportVideo({ videoUrl, spec, onProgress }) {
     const endBounded = Number.isFinite(clipEnd) && clipEnd > 0 && clipEnd < duration - 0.05;
     let finished = false;
 
+    // Reframe: everything downstream (canvas size, overlay coords) works on the
+    // cropped region, matching the editor preview and the server render.
+    const crop = spec && spec.crop;
+    const cw = crop ? Math.max(0.01, Number(crop.w) || 1) : 1;
+    const ch = crop ? Math.max(0.01, Number(crop.h) || 1) : 1;
+    const cx = crop ? Math.max(0, Number(crop.x) || 0) : 0;
+    const cy = crop ? Math.max(0, Number(crop.y) || 0) : 0;
+    const srcX = Math.round(videoW * cx);
+    const srcY = Math.round(videoH * cy);
+    const srcW = Math.max(2, Math.round(videoW * cw));
+    const srcH = Math.max(2, Math.round(videoH * ch));
+    // even dimensions keep H.264 encoders happy
+    const outW = srcW % 2 ? srcW - 1 : srcW;
+    const outH = srcH % 2 ? srcH - 1 : srcH;
+
+    const speed = Math.min(4, Math.max(0.25, Number(spec && spec.speed) || 1));
+    const volume = spec && spec.volume != null ? Math.max(0, Number(spec.volume)) : 1;
+    const cssFilter = filterToCss(spec && spec.filter);
+
     const canvas = document.createElement('canvas');
-    canvas.width = videoW;
-    canvas.height = videoH;
+    canvas.width = outW;
+    canvas.height = outH;
     const ctx = canvas.getContext('2d');
 
     // Audio: reroute the element's output into a recording-only graph. The
@@ -82,8 +101,11 @@ export function exportVideo({ videoUrl, spec, onProgress }) {
     const audioCtx = new AudioCtx();
     await audioCtx.resume().catch(() => {});
     const sourceNode = audioCtx.createMediaElementSource(video);
+    const gainNode = audioCtx.createGain();
+    gainNode.gain.value = volume;
     const destNode = audioCtx.createMediaStreamDestination();
-    sourceNode.connect(destNode);
+    sourceNode.connect(gainNode);
+    gainNode.connect(destNode);
 
     const canvasStream = canvas.captureStream(30);
     const combined = new MediaStream([
@@ -92,7 +114,7 @@ export function exportVideo({ videoUrl, spec, onProgress }) {
     ]);
 
     // cap bitrate so long clips don't balloon in memory
-    const videoBitsPerSecond = Math.min(12_000_000, Math.round(videoW * videoH * 8));
+    const videoBitsPerSecond = Math.min(12_000_000, Math.round(outW * outH * 8));
     const recorder = picked.mime
       ? new MediaRecorder(combined, { mimeType: picked.mime, videoBitsPerSecond })
       : new MediaRecorder(combined, { videoBitsPerSecond });
@@ -106,8 +128,12 @@ export function exportVideo({ videoUrl, spec, onProgress }) {
     let intervalId = null;
 
     const drawFrame = () => {
-      ctx.drawImage(video, 0, 0, videoW, videoH);
-      drawOverlays(ctx, spec, video.currentTime, videoW, videoH);
+      // ctx.filter is unsupported on some older WebKit builds; the grade is
+      // then simply skipped rather than failing the export.
+      if (cssFilter && cssFilter !== 'none') ctx.filter = cssFilter;
+      ctx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, outW, outH);
+      ctx.filter = 'none';
+      drawOverlays(ctx, spec, video.currentTime, outW, outH);
       onProgress?.(Math.min(1, (video.currentTime - clipStart) / effDuration));
     };
 
@@ -167,6 +193,9 @@ export function exportVideo({ videoUrl, spec, onProgress }) {
       };
 
       const startPlayback = () => {
+        // Recording is real-time off the canvas, so playing faster IS the speed
+        // change — the captured stream and its audio come out re-timed.
+        video.playbackRate = speed;
         video.play()
           .then(() => {
             recorder.start(1000); // timesliced so memory pressure surfaces progressively

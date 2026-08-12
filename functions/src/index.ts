@@ -942,6 +942,34 @@ interface OverlaySpec {
   texts?: SpecText[];
   captions?: SpecCaptions;
   clip?: { start?: number; end?: number } | null;
+  // Single-clip edit settings from the editor. All optional; absent means the
+  // identity value, so specs saved before these existed render unchanged.
+  speed?: number;
+  volume?: number;
+  filter?: string;
+  crop?: { x?: number; y?: number; w?: number; h?: number } | null;
+}
+
+// Colour grades. Must stay in sync with FILTER_PRESETS in
+// src/services/overlayRenderer.js so a look matches the editor preview.
+const FILTER_PRESETS: Record<string, { brightness: number; contrast: number; saturation: number }> = {
+  none: { brightness: 0, contrast: 1, saturation: 1 },
+  punch: { brightness: 0.02, contrast: 1.18, saturation: 1.25 },
+  warm: { brightness: 0.05, contrast: 1.06, saturation: 1.15 },
+  cool: { brightness: 0.02, contrast: 1.1, saturation: 0.9 },
+  mono: { brightness: 0.02, contrast: 1.15, saturation: 0 },
+  faded: { brightness: 0.08, contrast: 0.88, saturation: 0.85 },
+};
+
+// ffmpeg's atempo only accepts 0.5–2.0, so anything outside that range is
+// reached by chaining stages (e.g. 4x = atempo=2.0,atempo=2.0).
+function atempoChain(speed: number): string[] {
+  const stages: string[] = [];
+  let remaining = speed;
+  while (remaining > 2.0 + 1e-6) { stages.push("atempo=2.0"); remaining /= 2; }
+  while (remaining < 0.5 - 1e-6) { stages.push("atempo=0.5"); remaining *= 2; }
+  if (Math.abs(remaining - 1) > 1e-6) stages.push(`atempo=${remaining.toFixed(4)}`);
+  return stages;
 }
 
 // #RRGGBB -> ASS &H00BBGGRR (opaque). Falls back to white.
@@ -976,14 +1004,15 @@ function wrapAss(text: string, maxChars: number): string {
 // Returns the ASS document plus how many burn events it produced (0 = nothing
 // to render, caller can skip ffmpeg and post the original).
 function buildOverlayAss(
-  spec: OverlaySpec, width: number, height: number, duration: number, clipStart: number
+  spec: OverlaySpec, width: number, height: number, duration: number, clipStart: number,
+  timeScale = 1
 ): { ass: string; count: number } {
   const events: string[] = [];
 
   for (const el of spec.texts ?? []) {
     if (!el.text || !el.text.trim()) continue;
-    const start = Math.max(0, (el.start ?? 0) - clipStart);
-    const end = Math.max(start, (el.end == null ? duration : el.end) - clipStart);
+    const start = Math.max(0, ((el.start ?? 0) - clipStart) / timeScale);
+    const end = Math.max(start, ((el.end == null ? duration : el.end) - clipStart) / timeScale);
     const fs = Math.max(8, Math.round((el.size ?? 0.05) * height));
     const cx = Math.round((el.x ?? 0.5) * width);
     const cy = Math.round((el.y ?? 0.5) * height);
@@ -1008,8 +1037,8 @@ function buildOverlayAss(
     for (const line of caps.lines) {
       const text = String(line.text ?? "").toUpperCase();
       if (!text.trim()) continue;
-      const start = Math.max(0, (line.start ?? 0) - clipStart);
-      const end = Math.max(start, (line.end ?? start) - clipStart);
+      const start = Math.max(0, ((line.start ?? 0) - clipStart) / timeScale);
+      const end = Math.max(start, ((line.end ?? start) - clipStart) / timeScale);
       const tags = `\\an5\\pos(${cx},${cy})\\fs${fs}\\c&H00FFFFFF&\\3c&H00000000&\\bord${bord}\\shad0\\b1`;
       const maxChars = Math.max(6, Math.floor((0.9 * width) / (fs * 0.62)));
       events.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Cap,,0,0,0,,{${tags}}${wrapAss(text, maxChars)}`);
@@ -1176,7 +1205,15 @@ async function performOverlayRender(
 ): Promise<{ videoUrl: string; rendered: boolean }> {
   const hasText = (spec?.texts ?? []).some((t) => t.text && t.text.trim());
   const hasCaptions = Boolean(spec?.captions?.enabled && (spec?.captions?.lines ?? []).length);
-  if (!spec || (!hasText && !hasCaptions)) return { videoUrl, rendered: false };
+  // Editor settings that change the picture or audio even with no text on it.
+  const speed = Math.min(4, Math.max(0.25, Number(spec?.speed) || 1));
+  const volume = spec?.volume == null ? 1 : Math.max(0, Number(spec.volume) || 0);
+  const grade = FILTER_PRESETS[spec?.filter ?? "none"] ? (spec?.filter ?? "none") : "none";
+  const hasCrop = Boolean(spec?.crop && Number(spec.crop.w) > 0 && Number(spec.crop.h) > 0 &&
+    (Number(spec.crop.w) < 0.999 || Number(spec.crop.h) < 0.999));
+  const hasClip = Boolean(spec?.clip && Number.isFinite(Number(spec.clip.start)));
+  const hasEdits = Math.abs(speed - 1) > 1e-6 || Math.abs(volume - 1) > 1e-6 || grade !== "none" || hasCrop || hasClip;
+  if (!spec || (!hasText && !hasCaptions && !hasEdits)) return { videoUrl, rendered: false };
 
   const work = path.join(os.tmpdir(), randomUUID());
   const inputPath = `${work}-in.mp4`;
@@ -1199,26 +1236,52 @@ async function performOverlayRender(
     // the job stuck on "POSTING…" forever. 1080p already exceeds what any social
     // platform serves. Positions in the spec are fractional, so building the ASS
     // at the scaled size keeps the burned-in text aligned.
-    const MAX_EDGE = 1920;
-    const longEdge = Math.max(width, height) || MAX_EDGE;
-    const scaleF = longEdge > MAX_EDGE ? MAX_EDGE / longEdge : 1;
-    const sw = Math.max(2, Math.round((width * scaleF) / 2) * 2);
-    const sh = Math.max(2, Math.round((height * scaleF) / 2) * 2);
+    // Reframe first: everything after it (the 1080p cap, the burn canvas, the
+    // fractional overlay positions) works on the cropped frame, which is what
+    // the editor previewed.
+    const cropW = hasCrop ? Math.min(1, Math.max(0.01, Number(spec.crop!.w) || 1)) : 1;
+    const cropH = hasCrop ? Math.min(1, Math.max(0.01, Number(spec.crop!.h) || 1)) : 1;
+    const cropX = hasCrop ? Math.min(1 - cropW, Math.max(0, Number(spec.crop!.x) || 0)) : 0;
+    const cropY = hasCrop ? Math.min(1 - cropH, Math.max(0, Number(spec.crop!.y) || 0)) : 0;
+    const cw = Math.max(2, Math.round((width * cropW) / 2) * 2);
+    const chh = Math.max(2, Math.round((height * cropH) / 2) * 2);
+    const cx = Math.round(width * cropX);
+    const cy = Math.round(height * cropY);
 
-    const { ass, count } = buildOverlayAss(spec, sw, sh, duration || 3600, clipStart);
-    if (count === 0) return { videoUrl, rendered: false };
+    const MAX_EDGE = 1920;
+    const longEdge = Math.max(cw, chh) || MAX_EDGE;
+    const scaleF = longEdge > MAX_EDGE ? MAX_EDGE / longEdge : 1;
+    const sw = Math.max(2, Math.round((cw * scaleF) / 2) * 2);
+    const sh = Math.max(2, Math.round((chh * scaleF) / 2) * 2);
+
+    // Subtitles burn after setpts, so the event clock is the OUTPUT clock —
+    // spec times (source seconds) divide by the speed factor.
+    const { ass, count } = buildOverlayAss(spec, sw, sh, duration || 3600, clipStart, speed);
+    if (count === 0 && !hasEdits) return { videoUrl, rendered: false };
     await fs.writeFile(assPath, ass);
 
-    const vf = scaleF < 1
-      ? `scale=${sw}:${sh}:flags=bicubic,subtitles=${assPath}:fontsdir=${fontsDir}`
-      : `subtitles=${assPath}:fontsdir=${fontsDir}`;
+    const vfParts: string[] = [];
+    if (hasCrop) vfParts.push(`crop=${cw}:${chh}:${cx}:${cy}`);
+    if (scaleF < 1) vfParts.push(`scale=${sw}:${sh}:flags=bicubic`);
+    if (grade !== "none") {
+      const g = FILTER_PRESETS[grade];
+      vfParts.push(`eq=brightness=${g.brightness}:contrast=${g.contrast}:saturation=${g.saturation}`);
+    }
+    if (Math.abs(speed - 1) > 1e-6) vfParts.push(`setpts=${(1 / speed).toFixed(6)}*PTS`);
+    if (count > 0) vfParts.push(`subtitles=${assPath}:fontsdir=${fontsDir}`);
+    const vf = vfParts.join(",");
+
+    const afParts: string[] = [];
+    if (Math.abs(speed - 1) > 1e-6) afParts.push(...atempoChain(speed));
+    if (Math.abs(volume - 1) > 1e-6) afParts.push(`volume=${volume.toFixed(3)}`);
+    const hasAudio = meta.audioIndex != null;
 
     const args = ["-y"];
     if (clip && clipDur > 0) args.push("-ss", String(clipStart), "-t", String(clipDur));
+    args.push("-i", inputPath, ...mapArgs(meta));
+    if (vf) args.push("-vf", vf);
+    if (hasAudio && afParts.length) args.push("-af", afParts.join(","));
     args.push(
-      "-i", inputPath,
-      ...mapArgs(meta),
-      "-vf", vf,
       "-c:v", "libx264",
       "-preset", "veryfast",
       "-pix_fmt", "yuv420p",
