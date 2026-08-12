@@ -516,6 +516,7 @@ export const publishPost = onRequest(
       const result = await performZernioPublish(body);
       res.json({ status: "ok", ...result });
     } catch (e) {
+      console.error("publishPost failed:", e instanceof Error ? e.stack ?? e.message : e);
       const code = e instanceof JobError ? e.code : 500;
       res.status(code).json({ error: e instanceof Error ? e.message : "Publish failed." });
     }
@@ -1190,6 +1191,7 @@ export const renderOverlays = onRequest(
       const out = await performOverlayRender(videoUrl, spec ?? null, safeJobId);
       res.json({ status: "ok", ...out });
     } catch (e) {
+      console.error("renderOverlays failed:", e instanceof Error ? e.stack ?? e.message : e);
       const code = e instanceof JobError ? e.code : 500;
       res.status(code).json({ error: e instanceof Error ? e.message : "Overlay render failed." });
     }
@@ -1407,6 +1409,9 @@ export const publishJobWorker = onDocumentCreated(
         })(),
       ]);
     } catch (e) {
+      // Cloud Logging had nothing at all before this — the job doc was the only
+      // record a failure ever happened.
+      console.error("publishJobWorker failed:", snap.id, e instanceof Error ? e.stack ?? e.message : e);
       await patch({
         status: "failed",
         error: e instanceof Error ? e.message : "Publish job failed.",
@@ -1457,6 +1462,103 @@ export const adminRecentJobs = onRequest(
       res.json({ jobs });
     } catch (e) {
       res.status(500).json({ error: e instanceof Error ? e.message : "Failed to load activity." });
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Client error intake. Before this, every error a user saw lived only in React
+// state and died with the tab — nothing off-device ever knew the app had
+// broken. This is the durable record that error-watch polls and the triage
+// Routine diagnoses.
+//
+// The document ID is the fingerprint, so one distinct bug is one document
+// forever no matter how many users hit it how many times. That is what stops a
+// broken render loop from writing thousands of rows.
+// ---------------------------------------------------------------------------
+
+// Strip anything credential-shaped before it is stored. Users paste API keys
+// into this app, and Storage download URLs carry access tokens, so both
+// routinely appear inside error strings. The client scrubs too; this is the
+// pass that actually guarantees it, since the client can be bypassed.
+const SECRET_PATTERNS: RegExp[] = [
+  /sk-[A-Za-z0-9_-]{12,}/g,
+  /AIza[A-Za-z0-9_-]{20,}/g,
+  /Bearer\s+[A-Za-z0-9._-]{12,}/gi,
+  /eyJ[A-Za-z0-9._-]{20,}/g,
+  /([?&](?:token|access_token|key|api_key)=)[^&\s"']+/gi,
+  /\b[A-Fa-f0-9]{32,}\b/g,
+];
+
+function scrubSecrets(value: unknown, max: number): string {
+  let out = String(value ?? "");
+  for (const pattern of SECRET_PATTERNS) out = out.replace(pattern, "[redacted]");
+  return out.slice(0, max);
+}
+
+export const reportClientError = onRequest(
+  {
+    cors: true,
+    timeoutSeconds: 30,
+    memory: "256MiB",
+  },
+  async (req, res) => {
+    // 405 on GET deliberately mirrors analyzeVideo, so the uptime workflow can
+    // prove this endpoint is alive with the same probe it already uses.
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const raw = JSON.stringify(body);
+      if (raw.length > 16000) throw new JobError(413, "Report too large.");
+
+      const message = scrubSecrets(body.message, 500);
+      if (!message.trim()) throw new JobError(400, "message is required.");
+
+      // Recomputed server-side rather than trusted, so a bad client cannot
+      // shard the collection into unbounded documents.
+      const stack = scrubSecrets(body.stack, 4000);
+      const firstFrame = (stack.split("\n")[1] ?? "").trim();
+      const basis = `${message}::${firstFrame}`;
+      let hash = 5381;
+      for (let i = 0; i < basis.length; i += 1) hash = ((hash << 5) + hash + basis.charCodeAt(i)) | 0;
+      const fingerprint = `c${(hash >>> 0).toString(36)}`;
+
+      const doc = getFirestore().collection("clientErrors").doc(fingerprint);
+      const snap = await doc.get();
+
+      await doc.set(
+        {
+          fingerprint,
+          message,
+          stack,
+          kind: scrubSecrets(body.kind, 60) || "unknown",
+          component: scrubSecrets(body.component, 500),
+          context: scrubSecrets(body.context, 1000),
+          // pathname only — a full URL can carry query-string secrets
+          path: scrubSecrets(body.url, 200),
+          userAgent: scrubSecrets(body.userAgent, 300),
+          appVersion: scrubSecrets(body.appVersion, 60),
+          count: FieldValue.increment(1),
+          lastSeenAt: FieldValue.serverTimestamp(),
+          ...(snap.exists
+            ? {}
+            : { firstSeenAt: FieldValue.serverTimestamp(), status: "new" }),
+        },
+        { merge: true }
+      );
+
+      // 204, never 200-with-an-error-field: that anti-pattern already blinds
+      // monitoring on accountsStatus/postHistory. Don't repeat it here of all
+      // places.
+      res.status(204).send("");
+    } catch (e) {
+      const code = e instanceof JobError ? e.code : 500;
+      console.error("reportClientError failed:", e instanceof Error ? e.message : e);
+      res.status(code).json({ error: e instanceof Error ? e.message : "Could not record error." });
     }
   }
 );

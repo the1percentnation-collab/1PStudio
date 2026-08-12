@@ -7,7 +7,10 @@ name: Uptime Check
 
 on:
   schedule:
-    # Every 5 minutes (GitHub's minimum; scheduled runs may be delayed under load).
+    # Every 5 minutes (GitHub's minimum; scheduled runs may be delayed under
+    # load). This repo is public, so Actions minutes are free — there is no
+    # cost reason to check less often, and 5-minute precision on "when did it
+    # break" is worth having.
     - cron: '*/5 * * * *'
   workflow_dispatch: {}
 
@@ -49,4 +52,24 @@ jobs:
             sleep 10
           done
           echo "::error::AI endpoint $URL is not responding correctly (last HTTP $code) — content generation is likely broken"
+          exit 1
+
+      - name: Check error-reporting endpoint is alive
+        run: |
+          # The pipe that reports failures is itself a failure point: if this is
+          # down, client errors vanish silently and everything downstream goes
+          # quiet while looking healthy. Probe it from the outside. Same
+          # 405-means-deployed contract as /api/analyze.
+          URL="https://onepstudio-9a3ef.web.app/api/client-error"
+          echo "Checking $URL"
+          for attempt in 1 2 3; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$URL" || echo 000)
+            echo "Attempt $attempt: HTTP $code"
+            if [ "$code" = "405" ] || [ "$code" = "204" ]; then
+              echo "Error-reporting endpoint alive (HTTP $code)"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Error reporting $URL is not responding (last HTTP $code) — client errors are being lost"
           exit 1

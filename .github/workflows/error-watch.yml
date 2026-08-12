@@ -1,0 +1,45 @@
+name: Error Watch
+
+# Reads the durable error records that the app now writes (clientErrors) plus
+# failed and STUCK publish jobs, and files a deduped GitHub issue for anything
+# new. This is the bridge to automated diagnosis: a Claude session cannot reach
+# production or read Firestore, but it can read issues.
+#
+# Every 15 minutes, which sets the ceiling on how long a user-facing error sits
+# unnoticed. This repo is public, so Actions minutes are free.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install functions dependencies (firebase-admin)
+        run: |
+          cd functions
+          npm ci
+
+      - name: Scan for new errors
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/sa.json
+          export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json
+          node functions/scripts/error-watch.mjs

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import DropZone from './DropZone';
 import { CAPTION_STYLES, renderCaptions } from '../services/captionService';
+import { reportError } from '../services/errorReporter';
 
 function formatMB(bytes) {
   if (!bytes) return '';
@@ -37,6 +38,7 @@ export default function CaptionsView() {
       setResult(data);
       setPhase('done');
     } catch (err) {
+      reportError(err, { kind: 'captions' });
       setError(err.message);
       setPhase('error');
     }
