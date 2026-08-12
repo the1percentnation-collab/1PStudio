@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useCallback, useState } from 'react';
-import { drawOverlays, getTextBounds, ensureFontsLoaded } from '../../services/overlayRenderer';
+import { drawOverlays, getTextBounds, ensureFontsLoaded, filterToCss } from '../../services/overlayRenderer';
 
 // Video + overlay canvas sharing an exactly computed letterboxed rect.
 // The canvas runs at native video resolution (scaled by CSS), so preview
@@ -12,6 +12,7 @@ export default function EditorStage({
   onMoveText,
   onTimeUpdate,
   onDurationKnown,
+  onDimsKnown,
   onEnded,
   videoRef,
 }) {
@@ -44,14 +45,28 @@ export default function EditorStage({
 
   const handleMetadata = useCallback((e) => {
     const v = e.currentTarget;
-    setVideoDims({ w: v.videoWidth || 720, h: v.videoHeight || 1280 });
+    const dims = { w: v.videoWidth || 720, h: v.videoHeight || 1280 };
+    setVideoDims(dims);
+    onDimsKnown?.(dims);
     onDurationKnown?.(v.duration);
     // For a clip, start playback at the clip's in-point.
     const clip = specRef.current?.clip;
     if (clip && Number(clip.start) > 0) {
       try { v.currentTime = Number(clip.start); } catch { /* ignore */ }
     }
-  }, [onDurationKnown]);
+  }, [onDurationKnown, onDimsKnown]);
+
+  // Speed and volume are element-level in the preview; the export applies the
+  // same values via playbackRate/gain (in-browser) or ffmpeg (server render).
+  useEffect(() => {
+    const v = videoRef.current;
+    if (v) v.playbackRate = spec?.speed || 1;
+  }, [spec, videoRef]);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (v) v.volume = Math.min(1, spec?.volume == null ? 1 : spec.volume);
+  }, [spec, videoRef]);
 
   // always-running draw loop: overlays + selection rect follow the video clock
   useEffect(() => {
@@ -137,13 +152,26 @@ export default function EditorStage({
     canvasRef.current?.releasePointerCapture?.(e.pointerId);
   }, []);
 
-  // letterboxed display rect
+  // Reframing crops the *source*, so the stage shows the cropped region only:
+  // the frame is blown up and offset inside an overflow-hidden window, and the
+  // overlay canvas is sized to the cropped pixels. Overlay coordinates are
+  // fractions of that cropped frame, which is exactly what the export burns.
+  const crop = spec?.crop || null;
+  const cropW = crop ? Math.max(0.01, crop.w) : 1;
+  const cropH = crop ? Math.max(0.01, crop.h) : 1;
+  const cropX = crop ? crop.x || 0 : 0;
+  const cropY = crop ? crop.y || 0 : 0;
+
+  const framePxW = videoDims ? Math.round(videoDims.w * cropW) : 0;
+  const framePxH = videoDims ? Math.round(videoDims.h * cropH) : 0;
+
+  // letterboxed display rect for the (possibly cropped) frame
   let displayW = 0;
   let displayH = 0;
   if (videoDims && containerSize) {
-    const scale = Math.min(containerSize.w / videoDims.w, containerSize.h / videoDims.h);
-    displayW = Math.floor(videoDims.w * scale);
-    displayH = Math.floor(videoDims.h * scale);
+    const scale = Math.min(containerSize.w / framePxW, containerSize.h / framePxH);
+    displayW = Math.floor(framePxW * scale);
+    displayH = Math.floor(framePxH * scale);
   }
 
   return (
@@ -160,7 +188,16 @@ export default function EditorStage({
         overflow: 'hidden',
       }}
     >
-      <div style={{ position: 'relative', width: displayW, height: displayH }}>
+      <div
+        style={{
+          position: 'relative',
+          width: displayW,
+          height: displayH,
+          overflow: 'hidden',
+          borderRadius: 14,
+          background: '#000',
+        }}
+      >
         <video
           ref={videoRef}
           src={videoUrl}
@@ -169,13 +206,22 @@ export default function EditorStage({
           onLoadedMetadata={handleMetadata}
           onTimeUpdate={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
           onEnded={() => onEnded?.()}
-          style={{ width: '100%', height: '100%', display: 'block', background: '#000' }}
+          style={{
+            position: 'absolute',
+            width: `${100 / cropW}%`,
+            height: `${100 / cropH}%`,
+            left: `${(-cropX / cropW) * 100}%`,
+            top: `${(-cropY / cropH) * 100}%`,
+            display: 'block',
+            background: '#000',
+            filter: filterToCss(spec?.filter),
+          }}
         />
         {videoDims && (
           <canvas
             ref={canvasRef}
-            width={videoDims.w}
-            height={videoDims.h}
+            width={framePxW}
+            height={framePxH}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}

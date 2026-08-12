@@ -33,10 +33,38 @@ export function makeTextElement({ text = 'YOUR TEXT', x = 0.5, y = 0.5 } = {}) {
   };
 }
 
+// Colour-grade presets. Values map 1:1 onto a CSS filter string for the preview
+// and onto ffmpeg's `eq` filter for the server render, so a look is identical
+// in both places. Keep the two lists below in sync with FILTER_PRESETS in
+// functions/src/index.ts.
+export const FILTER_PRESETS = {
+  none: { label: 'None', brightness: 0, contrast: 1, saturation: 1 },
+  punch: { label: 'Punch', brightness: 0.02, contrast: 1.18, saturation: 1.25 },
+  warm: { label: 'Warm', brightness: 0.05, contrast: 1.06, saturation: 1.15 },
+  cool: { label: 'Cool', brightness: 0.02, contrast: 1.1, saturation: 0.9 },
+  mono: { label: 'Mono', brightness: 0.02, contrast: 1.15, saturation: 0 },
+  faded: { label: 'Faded', brightness: 0.08, contrast: 0.88, saturation: 0.85 },
+};
+
+// CSS equivalent of a preset, for the preview <video> and the export canvas.
+export function filterToCss(name) {
+  const p = FILTER_PRESETS[name];
+  if (!p || name === 'none') return 'none';
+  // ffmpeg eq brightness is an additive -1..1 offset; CSS brightness is a
+  // multiplier — 1 + offset matches closely over the range we expose.
+  return `brightness(${(1 + p.brightness).toFixed(3)}) contrast(${p.contrast}) saturate(${p.saturation})`;
+}
+
 export function createDefaultSpec({ onScreenText = '', words = [], duration = null }) {
   return {
     version: 1,
     duration,
+    // Single-clip edit settings. All optional — an older saved spec without
+    // them renders exactly as it always did.
+    speed: 1,
+    volume: 1,
+    filter: 'none',
+    crop: null, // { x, y, w, h } as fractions of the source frame
     texts: onScreenText
       ? [makeTextElement({ text: onScreenText, x: 0.5, y: 0.18 })]
       : [],
