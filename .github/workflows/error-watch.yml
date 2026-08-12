@@ -43,3 +43,130 @@ jobs:
           echo "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > /tmp/sa.json
           export GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json
           node functions/scripts/error-watch.mjs
+
+  # Runs ONLY when the scan found something, so a quiet queue costs nothing.
+  # Event-driven rather than polled: diagnosis starts seconds after detection.
+  #
+  # Deliberately NOT given the Firebase service account. This job reads issues
+  # and code, and can curl the public site; it has no reason to hold production
+  # database credentials.
+  diagnose:
+    needs: watch
+    if: needs.watch.result == 'failure'
+    runs-on: ubuntu-latest
+    # One diagnosis at a time — never let two sessions work the same issue.
+    concurrency:
+      group: error-diagnose
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history so it can correlate an error to a deploy
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Diagnose the newest error
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_args: '--max-turns 40'
+          prompt: |
+            You are the automated error-triage agent for 1P Studio. The error-watch
+            scan just failed, which means it filed at least one new issue. Diagnose
+            exactly ONE of them, then stop.
+
+            ## STEP 1 — PICK ONE
+
+            List open issues labelled `auto-error` that are NOT also labelled
+            `diagnosed`, `diagnosing`, `vendor-transient`, `wontfix`, or
+            `needs-human`. If there are none, reply "Nothing undiagnosed." and stop
+            immediately — do not read source files.
+
+            Otherwise take the OLDEST, and label it `diagnosing` before you start
+            (create the label if it does not exist). Handle exactly one issue.
+
+            ## STEP 2 — READ THE EVIDENCE
+
+            The issue body has the fingerprint, kind, occurrence count, path, the
+            commit SHA the bundle was built from, browser, message, stack, and
+            component stack. That is your primary evidence.
+
+            You are on a GitHub runner, so unlike the sandbox you CAN reach the live
+            site at https://onepstudio-9a3ef.web.app — a GET on /api/analyze or
+            /api/client-error returning 405 means that function is deployed and
+            healthy. You do NOT have database credentials and cannot read Firestore
+            or Cloud Logging; do not try.
+
+            ## STEP 3 — TRIAGE BEFORE FIXING
+
+            (a) VENDOR / TRANSIENT — the message names an external service
+            (api.anthropic.com, api.deepgram.com, ayrshare/zernio,
+            firebasestorage.googleapis.com) AND shows 5xx / 429 / timeout / network,
+            AND the stack does not reach our own code. Also transient: a single
+            occurrence of a network error, quota messages, user cancellations.
+            → Comment your reasoning, label `vendor-transient`, remove
+            `diagnosing`, close the issue. No code change.
+
+            (b) REAL REGRESSION — the stack lands in src/ or functions/src/, or the
+            count is 3 or more, or it started right after a deploy. Use
+            `git log --oneline -20` to check whether the reported commit SHA is at
+            or just after a commit touching the files in the stack.
+
+            (c) STUCK PUBLISH JOB (title starts "[auto] publish job stuck") —
+            publishJobWorker in functions/src/index.ts is a Firestore trigger with
+            no retry, 540s timeout, 4GiB. It died without writing status 'failed',
+            usually an OOM or timeout during ffmpeg. Read the render path and the
+            history of PR #46 ("Cap burn-in render at 1080p") first.
+
+            (d) NOT ENOUGH INFORMATION — say so plainly, name the field that would
+            have made it diagnosable, label `needs-info`, remove `diagnosing`, stop.
+            Do not guess.
+
+            ## STEP 4 — REPRODUCE (classes b and c only)
+
+            Available: `npm ci && CI=true npm run build` catches import, syntax and
+            lint breaks. `cd functions && npm ci && npx tsc --noEmit` catches type
+            regressions. State clearly whether you REPRODUCED the failure or only
+            INFERRED it. Never present inference as reproduction.
+
+            ## STEP 5 — REPORT, AND FIX ONLY IF IT IS SMALL
+
+            Comment on the issue with: Summary (one sentence), Evidence (fields you
+            relied on and commands you ran), Root cause (file:line, or "unknown"),
+            Confidence (high/medium/low and why), Fix (the change, or "no code
+            change needed").
+
+            Then, only if confidence is HIGH and the fix is under ~40 changed lines:
+            open ONE pull request against `main` from a branch named
+            `fix/auto-<fingerprint>`, with "Fixes #<issue>" in the body. Otherwise
+            comment only.
+
+            NEVER merge a pull request. NEVER push to `main` directly.
+
+            Finally remove `diagnosing` and add `diagnosed` — this is what stops the
+            next run re-diagnosing the same thing. Do it even when you produced no
+            fix.
+
+            ## HARD RULES
+
+            - One issue and at most one PR per run.
+            - Before opening a PR, search open PRs for the fingerprint. If one
+              exists, comment a status update and open nothing.
+            - If this error recurred after a previous automated fix was merged, do
+              NOT try again: comment "Repeated failure after a previous automated
+              fix — escalating for human review", label `needs-human`, stop.
+            - NEVER modify anything under .github/workflows/. A bad edit there
+              silently disables the monitoring that spawned you.
+            - NEVER commit a secret or the contents of functions/.env. If you find a
+              secret in an issue body, redact the issue body, comment, label
+              `security`, and that is the entire task for this run.
