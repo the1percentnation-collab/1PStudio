@@ -74,7 +74,7 @@ function ContentField({ label, value, mono }) {
   );
 }
 
-function VideoPreview({ url, filename }) {
+function VideoPreview({ url, filename, poster }) {
   if (!url) return null;
   return (
     <div style={{ padding: '0 16px 14px' }}>
@@ -83,6 +83,9 @@ function VideoPreview({ url, filename }) {
         controls
         playsInline
         preload="metadata"
+        // iOS won't paint a first frame until playback starts, leaving a black
+        // rectangle — the extracted hook frame stands in until then.
+        poster={poster}
         aria-label={`Preview of ${filename}`}
         style={{
           width: '100%',
@@ -398,7 +401,13 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished,
       </div>
 
       {/* VIDEO PREVIEW — playable copy of the uploaded file (videos only) */}
-      {!isPhoto && <VideoPreview url={videoUrl} filename={filename} />}
+      {!isPhoto && (
+        <VideoPreview
+          url={videoUrl}
+          filename={filename}
+          poster={frames?.hookFrame ? `data:image/jpeg;base64,${frames.hookFrame}` : undefined}
+        />
+      )}
 
       {/* FRAME STRIP — hook screenshot + mid + end (or single photo), all downloadable */}
       <FrameStrip frames={frames} isPhoto={isPhoto} />
