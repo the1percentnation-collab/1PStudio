@@ -6,11 +6,17 @@ name: Uptime Check
 # settings (email by default).
 
 on:
+  # Post-deploy check on a trigger that is proven to fire here. GitHub's
+  # scheduler has never run this workflow; workflow_run drives the smoke test
+  # after every deploy without fail, so a deploy at least always gets verified.
+  workflow_run:
+    workflows: ["Deploy to Firebase"]
+    types: [completed]
   schedule:
     # Every 5 minutes (GitHub's minimum; scheduled runs may be delayed under
     # load). This repo is public, so Actions minutes are free — there is no
     # cost reason to check less often, and 5-minute precision on "when did it
-    # break" is worth having.
+    # break" is worth having. Currently NOT firing; see the note above.
     - cron: '*/5 * * * *'
   workflow_dispatch: {}
 

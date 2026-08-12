@@ -9,6 +9,13 @@ name: Error Watch
 # unnoticed. This repo is public, so Actions minutes are free.
 
 on:
+  # GitHub's scheduler has never once fired for this repo — both cron workflows
+  # sat at zero runs for hours. workflow_run, by contrast, is proven: it drives
+  # the smoke test after every deploy. So detection hangs off the trigger that
+  # actually works, and the cron stays as a bonus for if/when it starts.
+  workflow_run:
+    workflows: ["Deploy to Firebase"]
+    types: [completed]
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch: {}
