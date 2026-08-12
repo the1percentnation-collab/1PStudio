@@ -12,18 +12,34 @@ const ASPECTS = {
   '16:9': { label: '16:9', css: '16 / 9', w: 1920, h: 1080 },
 };
 
+// MP4/H.264 first. It is the only container every target handles: iOS Safari
+// cannot decode WebM (a WebM take plays as a black rectangle on iPhone), and
+// TikTok/Reels/Shorts all expect MP4. WebM is the fallback for browsers that
+// can't record MP4.
 const MIME_CANDIDATES = [
+  'video/mp4;codecs=h264,aac',
+  'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+  'video/mp4',
   'video/webm;codecs=vp9,opus',
   'video/webm;codecs=vp8,opus',
   'video/webm',
-  'video/mp4;codecs=h264,aac',
-  'video/mp4',
 ];
 
 function pickMimeType() {
   if (typeof MediaRecorder === 'undefined') return null;
   if (!MediaRecorder.isTypeSupported) return '';
-  return MIME_CANDIDATES.find((t) => MediaRecorder.isTypeSupported(t)) ?? '';
+
+  const recordable = MIME_CANDIDATES.filter((t) => MediaRecorder.isTypeSupported(t));
+  // Prefer a container this browser can also play back — Safari accepts a WebM
+  // recording request and then refuses to decode the result.
+  const probe = document.createElement('video');
+  return recordable.find((t) => probe.canPlayType(t) !== '') ?? recordable[0] ?? '';
+}
+
+function extensionFor(type) {
+  if (type.includes('mp4')) return 'mp4';
+  if (type.includes('quicktime')) return 'mov';
+  return 'webm';
 }
 
 function fmtTime(totalSeconds) {
@@ -76,6 +92,9 @@ const selectStyle = {
   outline: 'none',
   cursor: 'pointer',
 };
+
+// Fullscreen transport sits on a phone-width row — keep it to one line.
+const compactBtn = { fontSize: 13, padding: '10px 14px' };
 
 function Chip({ active, onClick, children, disabled }) {
   return (
@@ -134,6 +153,7 @@ export default function Recorder({ onUseRecording, busy }) {
   const [elapsed, setElapsed] = useState(0);
   const [countdown, setCountdown] = useState(0);
   const [recording, setRecording] = useState(null); // { file, url, size }
+  const [focus, setFocus] = useState(false);
 
   // teleprompter
   const [script, setScript] = useState(loadScript);
@@ -170,6 +190,16 @@ export default function Recorder({ onUseRecording, busy }) {
       /* storage full or unavailable — not worth failing over */
     }
   }, [script]);
+
+  // Focus mode covers the viewport — stop the page behind it from scrolling.
+  useEffect(() => {
+    if (!focus) return undefined;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [focus]);
 
   const stopMeter = useCallback(() => {
     cancelAnimationFrame(meterRafRef.current);
@@ -372,7 +402,10 @@ export default function Recorder({ onUseRecording, busy }) {
     };
 
     recorder.onstop = () => {
-      const type = mimeRef.current || chunksRef.current[0]?.type || 'video/webm';
+      // Trust what actually came out over what we asked for: Safari can hand
+      // back chunks in a different container than the one requested, and a
+      // mislabelled blob is one the browser then refuses to decode.
+      const type = chunksRef.current[0]?.type || recorder.mimeType || mimeRef.current || 'video/webm';
       const blob = new Blob(chunksRef.current, { type });
       chunksRef.current = [];
 
@@ -382,10 +415,11 @@ export default function Recorder({ onUseRecording, busy }) {
         return;
       }
 
-      const ext = type.includes('mp4') ? 'mp4' : 'webm';
+      const ext = extensionFor(type);
       const file = new File([blob], `1p-recording-${stampRef.current}.${ext}`, { type: blob.type });
       setRecording({ file, url: URL.createObjectURL(blob), size: blob.size });
       setStatus('review');
+      setFocus(false); // reviewing is easier in the normal layout
       stopStream(); // no reason to hold the camera open while reviewing
     };
 
@@ -405,6 +439,9 @@ export default function Recorder({ onUseRecording, busy }) {
     setResetSignal((n) => n + 1);
     setCountdown(3);
     setStatus('countdown');
+    // On a phone the stage doesn't fit alongside the controls, so go fullscreen
+    // for the take — otherwise you can't watch yourself and read at once.
+    if (typeof window !== 'undefined' && window.innerWidth < 768) setFocus(true);
 
     clearInterval(countdownRef.current);
     countdownRef.current = setInterval(() => {
@@ -457,6 +494,36 @@ export default function Recorder({ onUseRecording, busy }) {
   const canPause = typeof MediaRecorder !== 'undefined' && typeof MediaRecorder.prototype.pause === 'function';
   const stageWidth = aspect === '9:16' ? 430 : '100%';
 
+  // Focus mode blows the stage up to the whole viewport. On a phone the 9:16
+  // stage is taller than the screen, so in the normal layout you cannot see
+  // your face and the script at the same time — which is the entire point.
+  const stageStyle = focus
+    ? {
+        position: 'fixed',
+        inset: 0,
+        zIndex: 300,
+        width: '100%',
+        maxWidth: 'none',
+        margin: 0,
+        aspectRatio: 'auto',
+        background: '#000',
+        borderRadius: 0,
+        border: 'none',
+        overflow: 'hidden',
+      }
+    : {
+        position: 'relative',
+        width: '100%',
+        maxWidth: stageWidth,
+        margin: '0 auto',
+        aspectRatio: ASPECTS[aspect].css,
+        background: '#000',
+        borderRadius: r.lg,
+        overflow: 'hidden',
+        border: `1px solid ${isRecording ? c.red : c.border}`,
+        transition: 'border-color 0.2s',
+      };
+
   return (
     <div>
       <div style={{ marginBottom: 20 }}>
@@ -466,21 +533,9 @@ export default function Recorder({ onUseRecording, busy }) {
         </Display>
       </div>
 
-      {/* STAGE */}
-      <div
-        style={{
-          position: 'relative',
-          width: '100%',
-          maxWidth: stageWidth,
-          margin: '0 auto',
-          aspectRatio: ASPECTS[aspect].css,
-          background: '#000',
-          borderRadius: r.lg,
-          overflow: 'hidden',
-          border: `1px solid ${isRecording ? c.red : c.border}`,
-          transition: 'border-color 0.2s',
-        }}
-      >
+      {/* STAGE — the same element in both modes, so switching never tears down
+          the camera stream (a remount would drop srcObject). */}
+      <div style={stageStyle}>
         <video
           ref={videoRef}
           muted
@@ -604,8 +659,112 @@ export default function Recorder({ onUseRecording, busy }) {
             )}
           </div>
         )}
+
+        {/* FULLSCREEN CONTROLS — floated over the camera so the script stays
+            readable while recording. Only rendered in focus mode. */}
+        {focus && status !== 'review' && (
+          <>
+            <button
+              onClick={() => setFocus(false)}
+              aria-label="Exit fullscreen"
+              style={{
+                position: 'absolute',
+                top: 'calc(12px + env(safe-area-inset-top, 0px))',
+                right: 12,
+                background: 'rgba(0,0,0,0.6)',
+                border: `1px solid ${c.border}`,
+                borderRadius: r.pill,
+                color: '#FFF',
+                fontFamily: f.mono,
+                fontSize: 11,
+                letterSpacing: '0.14em',
+                padding: '8px 14px',
+              }}
+            >
+              EXIT
+            </button>
+
+            <div
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 10,
+                // scrim so the scrolling script never collides with the controls
+                background: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.82) 42%)',
+                padding: '56px 12px calc(18px + env(safe-area-inset-bottom, 0px))',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.55)', padding: '7px 12px', borderRadius: r.pill }}>
+                <span style={{ fontFamily: f.mono, fontSize: 10.5, letterSpacing: '0.16em', color: c.textDim }}>SPEED</span>
+                <button
+                  onClick={() => setSpeed((s) => Math.max(1, s - 1))}
+                  style={{ background: 'transparent', color: '#FFF', fontSize: 18, lineHeight: 1, padding: '0 8px' }}
+                  aria-label="Slower"
+                >
+                  −
+                </button>
+                <span style={{ fontFamily: f.mono, fontSize: 13, color: '#FFF', minWidth: 16, textAlign: 'center' }}>{speed}</span>
+                <button
+                  onClick={() => setSpeed((s) => Math.min(10, s + 1))}
+                  style={{ background: 'transparent', color: '#FFF', fontSize: 18, lineHeight: 1, padding: '0 8px' }}
+                  aria-label="Faster"
+                >
+                  +
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <Button
+                  variant={isRecording ? 'outline' : 'primary'}
+                  onClick={isRecording ? stopRecording : handleStart}
+                  disabled={!ready || status === 'countdown'}
+                  style={{ ...compactBtn, background: isRecording ? 'rgba(0,0,0,0.6)' : undefined }}
+                >
+                  {isRecording ? '■ Stop' : '● Record'}
+                </Button>
+                {isRecording && canPause && (
+                  <Button variant="ghost" onClick={handlePause} style={{ ...compactBtn, background: 'rgba(0,0,0,0.6)' }}>
+                    {status === 'paused' ? 'Resume' : 'Pause'}
+                  </Button>
+                )}
+                {showPrompter && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      onClick={() => setPromptPlaying((p) => !p)}
+                      disabled={!script.trim()}
+                      style={{ ...compactBtn, background: 'rgba(0,0,0,0.6)' }}
+                    >
+                      {promptPlaying ? 'Pause Text' : 'Scroll Text'}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      aria-label="Restart script"
+                      onClick={() => {
+                        setPromptPlaying(false);
+                        setResetSignal((n) => n + 1);
+                      }}
+                      style={{ ...compactBtn, background: 'rgba(0,0,0,0.6)' }}
+                    >
+                      ↺
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
+      {/* Everything below the stage is covered by focus mode — unmount it so
+          there is only ever one set of transport controls in the DOM. */}
+      {focus ? null : (
+      <>
       {/* MIC METER */}
       <div
         style={{
@@ -689,6 +848,10 @@ export default function Recorder({ onUseRecording, busy }) {
                 </Button>
               </>
             )}
+
+            <Button variant="ghost" onClick={() => setFocus(true)} disabled={!ready}>
+              ⛶ Fullscreen
+            </Button>
           </>
         )}
       </div>
@@ -807,6 +970,8 @@ export default function Recorder({ onUseRecording, busy }) {
           camera; some webcams record their native aspect ratio regardless.
         </div>
       </Card>
+      </>
+      )}
     </div>
   );
 }

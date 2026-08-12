@@ -56,13 +56,21 @@ scrolling over the live preview — no separate recording app or prompter needed
 5. On **Stop**, review the take, then **Download**, **Retake**, or
    **Generate Content**
 
+On a phone the take goes **fullscreen automatically** (tap **Fullscreen** to do it
+by hand on desktop): the camera fills the screen with the script scrolling over
+it and a floating Stop / Pause / Scroll Text / speed row, so you can watch
+yourself and read at the same time. **EXIT** returns to the normal layout, as
+does stopping the recording.
+
 **Generate Content** sends the take through the same pipeline as an upload, with
 your teleprompter script attached as the transcript — so Claude grades what you
 actually scripted and the clip skips re-transcription.
 
-Recording happens entirely in the browser (`MediaRecorder`, WebM where
-supported, MP4 on Safari), requires `https://` or `localhost`, and auto-stops at
-10 minutes since the take is held in memory.
+Recording happens entirely in the browser (`MediaRecorder`), requires `https://`
+or `localhost`, and auto-stops at 10 minutes since the take is held in memory.
+Takes are captured as **MP4/H.264** wherever the browser can record it — iOS
+Safari cannot decode WebM (a WebM take shows as a black player on iPhone) and
+every social platform expects MP4. WebM is used only as a fallback.
 
 ## Posting to Social Media (TikTok, IG Reels, YouTube Shorts, Facebook, X, LinkedIn)
 
