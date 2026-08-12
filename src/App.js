@@ -19,6 +19,7 @@ import QueueProgress from './components/QueueProgress';
 import LibraryView from './components/LibraryView';
 import { generateTikTokContent } from './services/claudeService';
 import { syncPostHistory } from './services/postSync';
+import { reportError } from './services/errorReporter';
 import VideoEditorModal from './components/editor/VideoEditorModal';
 import TextPostCreator from './components/TextPostCreator';
 import { putVideo, getVideo, deleteVideo } from './services/videoStore';
@@ -254,6 +255,9 @@ export default function App() {
     };
     const t = messages[s];
     if (!t) return;
+    if (s === 'failed') {
+      reportError(new Error(patch.publishError || 'Publish failed'), { kind: 'publish-job' });
+    }
     setToast(t);
     clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 7000);
@@ -346,6 +350,7 @@ export default function App() {
         setResults((prev) => [entry, ...prev]);
         addToLibrary(entry);
       } catch (err) {
+        reportError(err, { kind: 'generate', filename: file.name });
         updateQueueItem(id, { status: 'error', message: 'Failed' });
         const entry = {
           id,

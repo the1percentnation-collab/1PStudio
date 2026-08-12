@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useCallback } from 'react';
 import { exportVideo, pickMimeType } from '../../services/videoExporter';
+import { reportError } from '../../services/errorReporter';
 
 export default function ExportPanel({ videoUrl, spec, filename, duration, exportState, setExportState, compact = false, secondary = false }) {
   const jobRef = useRef(null);
@@ -33,6 +34,7 @@ export default function ExportPanel({ videoUrl, spec, filename, duration, export
       if (err?.message === 'cancelled') {
         setExportState({ status: 'idle', progress: 0, url: null, ext: null, error: null });
       } else {
+        reportError(err, { kind: 'editor-export' });
         setExportState({ status: 'error', progress: 0, url: null, ext: null, error: err?.message || 'Export failed.' });
       }
     } finally {

@@ -23,6 +23,10 @@ jobs:
 
       - name: Build React app
         run: npm run build
+        env:
+          # Stamps the bundle with the commit it was built from, so a client
+          # error report names the exact code that produced it.
+          REACT_APP_COMMIT_SHA: ${{ github.sha }}
 
       - name: Install functions dependencies and build
         run: |

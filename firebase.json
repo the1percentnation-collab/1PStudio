@@ -1,7 +1,7 @@
 {
   "functions": {
     "source": "functions",
-        "runtime": "nodejs20"
+    "runtime": "nodejs20"
   },
   "storage": {
     "rules": "storage.rules"
@@ -56,6 +56,11 @@
       {
         "source": "/api/render",
         "function": "renderOverlays",
+        "region": "us-central1"
+      },
+      {
+        "source": "/api/client-error",
+        "function": "reportClientError",
         "region": "us-central1"
       },
       {

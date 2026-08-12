@@ -4,6 +4,7 @@ import PublishPanel from './PublishPanel';
 import ClipPreview from './ClipPreview';
 import VideoEditorModal from './editor/VideoEditorModal';
 import { generateClips, CLIP_LENGTHS } from '../services/clipService';
+import { reportError } from '../services/errorReporter';
 import { exportVideo } from '../services/videoExporter';
 import { colors as c, fonts as f, radius as r } from '../theme';
 import { Eyebrow, Display, Card, Button, ScoreRing } from './ui';
@@ -34,7 +35,10 @@ function ClipCard({ result, onEdit, onPublished, onSaveToLibrary }) {
       const base = (result.title || 'clip').replace(/[^\w]+/g, '-').slice(0, 40).toLowerCase() || 'clip';
       setExported({ url, file: new File([blob], `${base}.${ext}`, { type: blob.type }), ext });
     } catch (err) {
-      if (err?.message !== 'cancelled') setError(err?.message || 'Render failed');
+      if (err?.message !== 'cancelled') {
+        reportError(err, { kind: 'clips-render' });
+        setError(err?.message || 'Render failed');
+      }
     } finally {
       setRendering(false); abortRef.current = null;
     }
@@ -107,6 +111,7 @@ export default function ClipsView({ onPublished, onSaveToLibrary }) {
       const { results, warning: w } = await generateClips(file, { clipCount, length }, setProgress);
       setClips(results); setWarning(w);
     } catch (err) {
+      reportError(err, { kind: 'clips-select' });
       setError(err?.message || 'Could not generate clips.');
     } finally {
       setBusy(false); setProgress(null);
