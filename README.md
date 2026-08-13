@@ -72,6 +72,25 @@ Takes are captured as **MP4/H.264** wherever the browser can record it — iOS
 Safari cannot decode WebM (a WebM take shows as a black player on iPhone) and
 every social platform expects MP4. WebM is used only as a fallback.
 
+## Transcribing a video (Transcribe tab)
+
+The **Transcribe** view turns a video (or a plain audio file) into text you can
+copy and paste — no captions burned in, nothing posted.
+
+1. Open **Transcribe** and drop in one video or audio file (`.mp4`, `.mov`,
+   `.m4a`, `.mp3`, …). It uploads to Firebase Storage, then Deepgram
+   transcribes it
+2. **Plain text** is editable — clean it up before you copy it. **With
+   timestamps** shows the same transcript broken into `[mm:ss]` paragraphs
+3. **Copy transcript** puts it on the clipboard; **Download .txt** and
+   **Download .srt** save it to a file (the `.srt` carries word-accurate
+   subtitle timings)
+
+Transcription uses your **Deepgram API key** — add it under **Settings** (the
+same key powers the Captions and Clips tabs). Without a key the tab tells you
+to set one instead of failing silently. Long recordings take a few minutes;
+keep the tab open.
+
 ## Posting to Social Media (TikTok, IG Reels, YouTube Shorts, Facebook, X, LinkedIn)
 
 1P Studio can publish a video + its Claude-generated caption straight to your
