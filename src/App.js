@@ -11,6 +11,7 @@ import PostsView from './components/PostsView';
 import Analytics from './components/Analytics';
 import AccountsView from './components/AccountsView';
 import CaptionsView from './components/CaptionsView';
+import TranscribeView from './components/TranscribeView';
 import ClipsView from './components/ClipsView';
 import Recorder from './components/Recorder';
 import DropZone from './components/DropZone';
@@ -74,6 +75,7 @@ const VIEW_META = {
   record: { title: 'Record', subtitle: 'Camera + built-in teleprompter' },
   clips: { title: 'Clips', subtitle: 'Turn one long video into viral clips' },
   captions: { title: 'Captions', subtitle: 'Auto burned-in subtitles' },
+  transcribe: { title: 'Transcribe', subtitle: 'Video to copy-paste text' },
   calendar: { title: 'Content Calendar', subtitle: 'Scheduled & published posts' },
   posts: { title: 'Posts', subtitle: 'Everything scheduled & published' },
   analytics: { title: 'Analytics', subtitle: 'Performance & content insights' },
@@ -467,6 +469,9 @@ export default function App() {
     }
     if (view === 'captions') {
       return <CaptionsView />;
+    }
+    if (view === 'transcribe') {
+      return <TranscribeView />;
     }
     if (view === 'analytics') {
       return <Analytics library={library} posts={posts} />;

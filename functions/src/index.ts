@@ -1572,7 +1572,11 @@ export const reportClientError = onRequest(
 export const transcribeAudio = onRequest(
   {
     cors: true,
-    timeoutSeconds: 120,
+    // Deepgram holds the connection open for the whole pre-recorded job, so a
+    // long upload (a full-length talk, a podcast) needs far more than a
+    // couple of minutes. Callers hit the function URL directly to dodge the
+    // 60s Hosting proxy cap.
+    timeoutSeconds: 540,
     memory: "256MiB",
   },
   async (req, res) => {

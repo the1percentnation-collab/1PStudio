@@ -1,7 +1,17 @@
 import React, { useState, useRef } from 'react';
 import { colors as c, fonts as f } from '../theme';
 
-export default function DropZone({ onFilesSelected, processing }) {
+export default function DropZone({
+  onFilesSelected,
+  processing,
+  accept = 'video/*,image/*',
+  multiple = true,
+  heading = 'DROP VIDEOS OR PHOTOS HERE',
+  sub = 'Drag & drop up to 20 videos or photos, or click to browse',
+  tip = 'Tip: long or 4K iPhone videos are large and load slowly, especially from iCloud. For speed, use Wi-Fi and pick shorter clips already downloaded to your device.',
+  busyHeading = 'LOADING YOUR MEDIA…',
+  busySub = 'Reading the file and generating your content. This can take a moment for longer clips — please keep this tab open.',
+}) {
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef(null);
 
@@ -52,20 +62,27 @@ export default function DropZone({ onFilesSelected, processing }) {
     setDragging(false);
   };
 
-  // Accept anything the browser tags as video/* or image/*, but also fall back
-  // to the file extension — phone-recorded clips (.mov/.hevc) and some photos
-  // often arrive with an empty or non-standard MIME type and would otherwise be
-  // silently dropped.
-  const MEDIA_EXT = /\.(mp4|mov|m4v|webm|avi|mkv|hevc|3gp|mpeg|mpg|qt|jpg|jpeg|png|gif|webp|heic|heif)$/i;
+  // Accept anything the browser tags with an accepted top-level type, but also
+  // fall back to the file extension — phone-recorded clips (.mov/.hevc), voice
+  // memos (.m4a) and some photos arrive with an empty or non-standard MIME type
+  // and would otherwise be silently dropped.
+  const EXT_BY_KIND = {
+    video: /\.(mp4|mov|m4v|webm|avi|mkv|hevc|3gp|mpeg|mpg|qt)$/i,
+    image: /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i,
+    audio: /\.(mp3|m4a|wav|aac|ogg|oga|flac|amr|caf|wma)$/i,
+  };
+  const kinds = Object.keys(EXT_BY_KIND).filter((k) => accept.includes(`${k}/`));
   const isMediaFile = (f) =>
-    f.type.startsWith('video/') || f.type.startsWith('image/') || MEDIA_EXT.test(f.name);
+    kinds.some((k) => f.type.startsWith(`${k}/`) || EXT_BY_KIND[k].test(f.name));
+
+  const take = (files) => files.slice(0, multiple ? 20 : 1);
 
   const handleDrop = (e) => {
     e.preventDefault();
     setDragging(false);
     if (processing) return;
     const files = Array.from(e.dataTransfer.files).filter(isMediaFile);
-    if (files.length > 0) onFilesSelected(files.slice(0, 20));
+    if (files.length > 0) onFilesSelected(take(files));
   };
 
   const handleClick = () => {
@@ -74,7 +91,7 @@ export default function DropZone({ onFilesSelected, processing }) {
 
   const handleChange = (e) => {
     const files = Array.from(e.target.files || []);
-    if (files.length > 0) onFilesSelected(files.slice(0, 20));
+    if (files.length > 0) onFilesSelected(take(files));
     e.target.value = '';
   };
 
@@ -92,11 +109,8 @@ export default function DropZone({ onFilesSelected, processing }) {
             animation: 'spin 0.8s linear infinite',
           }}
         />
-        <div style={headingStyle}>LOADING YOUR MEDIA…</div>
-        <div style={subStyle}>
-          Reading the file and generating your content. This can take a moment for longer clips —
-          please keep this tab open.
-        </div>
+        <div style={headingStyle}>{busyHeading}</div>
+        <div style={subStyle}>{busySub}</div>
       </div>
     );
   }
@@ -110,19 +124,16 @@ export default function DropZone({ onFilesSelected, processing }) {
       onClick={handleClick}
     >
       <span style={iconStyle}>{icon}</span>
-      <div style={headingStyle}>DROP VIDEOS OR PHOTOS HERE</div>
-      <div style={subStyle}>
-        Drag &amp; drop up to 20 videos or photos, or click to browse
-      </div>
-      <div style={{ fontSize: 12, color: c.textFaint, marginTop: 8, lineHeight: 1.5 }}>
-        Tip: long or 4K iPhone videos are large and load slowly, especially from iCloud.
-        For speed, use Wi-Fi and pick shorter clips already downloaded to your device.
-      </div>
+      <div style={headingStyle}>{heading}</div>
+      <div style={subStyle}>{sub}</div>
+      {tip && (
+        <div style={{ fontSize: 12, color: c.textFaint, marginTop: 8, lineHeight: 1.5 }}>{tip}</div>
+      )}
       <input
         ref={inputRef}
         type="file"
-        accept="video/*,image/*"
-        multiple
+        accept={accept}
+        multiple={multiple}
         style={{ display: 'none' }}
         onChange={handleChange}
       />
