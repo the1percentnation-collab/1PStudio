@@ -16,6 +16,10 @@ export default function AccountsView() {
   useEffect(load, []);
 
   const connected = state.connected || [];
+  // A failed status read tells us nothing about any account. Rendering the
+  // whole list as "Not connected" in that case is a claim we can't back up —
+  // and it sends you off to reconnect accounts that were never broken.
+  const statusUnknown = Boolean(state.error) && !state.loading;
   const nameByPlatform = Object.fromEntries((state.displayNames || []).map((d) => [d.platform, d.displayName]));
 
   return (
@@ -57,7 +61,26 @@ export default function AccountsView() {
         </div>
       ) : state.error ? (
         <div style={{ background: 'rgba(255,68,68,0.07)', border: '1px solid #3A1515', borderRadius: 12, padding: '14px 16px', fontSize: 13, color: '#E08585', lineHeight: 1.5, marginBottom: 18 }}>
-          Couldn’t read account status: {state.error}
+          <div>Couldn’t read account status: {state.error}</div>
+          <div style={{ color: '#8A6A6A', marginTop: 4 }}>
+            Connection status below is unknown — this says nothing about whether your accounts are linked.
+          </div>
+          <button
+            onClick={load}
+            style={{
+              marginTop: 10,
+              background: 'transparent',
+              border: '1px solid #5A2626',
+              color: '#E08585',
+              fontSize: 12,
+              fontWeight: 700,
+              padding: '6px 14px',
+              borderRadius: 8,
+              cursor: 'pointer',
+            }}
+          >
+            Retry
+          </button>
         </div>
       ) : null}
 
@@ -80,6 +103,8 @@ export default function AccountsView() {
                 <div style={{ fontSize: 14, color: '#EEE', fontWeight: 600 }}>{label}</div>
                 {state.loading ? (
                   <div style={{ fontSize: 11, color: '#555', marginTop: 3 }}>Checking…</div>
+                ) : statusUnknown ? (
+                  <div style={{ fontSize: 11, color: '#8A6A6A', marginTop: 3 }}>Couldn’t check</div>
                 ) : isConnected ? (
                   <div style={{ fontSize: 11, color: '#00C48C', marginTop: 3 }}>
                     {nameByPlatform[id] ? `@${nameByPlatform[id]}` : 'Connected'}
@@ -100,7 +125,7 @@ export default function AccountsView() {
                 padding: '4px 12px',
                 flexShrink: 0,
               }}>
-                {state.loading ? '…' : isConnected ? '● Connected' : 'Connect ↗'}
+                {state.loading ? '…' : statusUnknown ? '? Unknown' : isConnected ? '● Connected' : 'Connect ↗'}
               </span>
             </div>
           );

@@ -302,18 +302,28 @@ interface ZernioAccount {
 // until the function's 540s hard kill — which skips the catch and leaves the
 // job stuck on "publishing" (the app shows "POSTING…") forever. Bounding each
 // call turns a hang into a clean, caught error the job records as "failed".
-const ZERNIO_TIMEOUT_MS = 120000; // 120s — generous; /posts normally replies in seconds
+// A single call must also never outlive the FUNCTION invocation that made it.
+// A function killed at its own timeout returns no response whatsoever — not a
+// 500, nothing — so Hosting drops the connection and the browser reports a bare
+// network failure with no status to show ("Load failed" in Safari). Each
+// budget below leaves room for the sequential calls its caller makes:
+//   reads    — /profiles + /accounts (or /posts), 2 x 12s inside a 30s function
+//   publish  — /profiles + /accounts + POST /posts, 3 x 30s inside 120s (the
+//              endpoint) or the worker's 500s deadline
+const ZERNIO_READ_TIMEOUT_MS = 12000;
+const ZERNIO_PUBLISH_TIMEOUT_MS = 30000;
 
 async function zernioFetch(
   path: string,
   apiKey: string,
   init?: RequestInit,
+  timeoutMs: number = ZERNIO_PUBLISH_TIMEOUT_MS,
 ): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
   let r: Response;
   try {
     r = await fetch(`${ZERNIO_API}${path}`, {
       ...init,
-      signal: init?.signal ?? AbortSignal.timeout(ZERNIO_TIMEOUT_MS),
+      signal: init?.signal ?? AbortSignal.timeout(timeoutMs),
       headers: {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
@@ -324,7 +334,7 @@ async function zernioFetch(
     const name = (e as { name?: string })?.name;
     if (name === "TimeoutError" || name === "AbortError") {
       throw new JobError(504,
-        `Zernio didn't respond within ${ZERNIO_TIMEOUT_MS / 1000}s (${path}). It may be busy — try posting again.`);
+        `Zernio didn't respond within ${Math.round(timeoutMs / 1000)}s (${path}). It may be busy — try again.`);
     }
     throw new JobError(502,
       `Couldn't reach Zernio (${path}): ${(e as Error)?.message || "network error"}`);
@@ -370,10 +380,14 @@ function zernioError(data: Record<string, unknown>): string | null {
 // Which Zernio profile to operate on. Pinned via the caller's profile id
 // (Settings / ZERNIO_PROFILE_ID), else the first profile on the account.
 // Returns null if the key has no profiles.
-async function resolveProfileId(apiKey: string, pinnedProfileId?: string): Promise<string | null> {
+async function resolveProfileId(
+  apiKey: string,
+  pinnedProfileId?: string,
+  timeoutMs: number = ZERNIO_PUBLISH_TIMEOUT_MS,
+): Promise<string | null> {
   const pinned = (pinnedProfileId ?? "").trim();
   if (pinned) return pinned;
-  const {ok, data} = await zernioFetch("/profiles", apiKey);
+  const {ok, data} = await zernioFetch("/profiles", apiKey, undefined, timeoutMs);
   if (!ok) return null;
   const first = asArray(data, "profiles", "data", "items")[0];
   const id = first?.id ?? first?.profileId ?? first?._id;
@@ -384,10 +398,13 @@ async function resolveProfileId(apiKey: string, pinnedProfileId?: string): Promi
 async function listZernioAccounts(
   apiKey: string,
   profileId: string,
+  timeoutMs: number = ZERNIO_PUBLISH_TIMEOUT_MS,
 ): Promise<ZernioAccount[]> {
   const {ok, data} = await zernioFetch(
     `/accounts?profileId=${encodeURIComponent(profileId)}`,
     apiKey,
+    undefined,
+    timeoutMs,
   );
   if (!ok) return [];
   return asArray(data, "accounts", "data", "items")
@@ -627,21 +644,24 @@ export const accountsStatus = onRequest(
     memory: "256MiB",
   },
   async (req, res) => {
-    const keys = await resolveUserKeys(req);
-    const apiKey = keys.zernio;
-    if (!apiKey) {
-      res.status(200).json({ configured: false, connected: [], displayNames: [] });
-      return;
-    }
-
+    // Everything is inside the try: a throw that escapes the handler kills the
+    // invocation without ever sending a response, and the browser sees that as
+    // a bare network error rather than a message it can show.
     try {
-      const profileId = await resolveProfileId(apiKey, keys.zernioProfile);
+      const keys = await resolveUserKeys(req);
+      const apiKey = keys.zernio;
+      if (!apiKey) {
+        res.status(200).json({ configured: false, connected: [], displayNames: [] });
+        return;
+      }
+
+      const profileId = await resolveProfileId(apiKey, keys.zernioProfile, ZERNIO_READ_TIMEOUT_MS);
       if (!profileId) {
         res.status(200).json({ configured: true, connected: [], displayNames: [], error: "No Zernio profile found for this API key." });
         return;
       }
 
-      const accounts = await listZernioAccounts(apiKey, profileId);
+      const accounts = await listZernioAccounts(apiKey, profileId, ZERNIO_READ_TIMEOUT_MS);
       const connected = Array.from(
         new Set(accounts.filter((a) => a.connected).map((a) => a.platform))
       );
@@ -713,17 +733,18 @@ export const postHistory = onRequest(
     memory: "256MiB",
   },
   async (req, res) => {
-    const keys = await resolveUserKeys(req);
-    const apiKey = keys.zernio;
-    if (!apiKey) {
-      res.status(200).json({ configured: false, posts: [] });
-      return;
-    }
-
+    // See accountsStatus: an escaping throw sends no response at all.
     try {
-      const profileId = await resolveProfileId(apiKey, keys.zernioProfile);
+      const keys = await resolveUserKeys(req);
+      const apiKey = keys.zernio;
+      if (!apiKey) {
+        res.status(200).json({ configured: false, posts: [] });
+        return;
+      }
+
+      const profileId = await resolveProfileId(apiKey, keys.zernioProfile, ZERNIO_READ_TIMEOUT_MS);
       const path = profileId ? `/posts?profileId=${encodeURIComponent(profileId)}` : "/posts";
-      const { ok, status, data } = await zernioFetch(path, apiKey);
+      const { ok, status, data } = await zernioFetch(path, apiKey, undefined, ZERNIO_READ_TIMEOUT_MS);
 
       if (!ok) {
         res.status(200).json({ configured: true, posts: [], error: `Zernio error ${status}` });
