@@ -22,8 +22,14 @@ const PUBLISH_BADGES = {
   failed: { label: 'POST FAILED', color: '#FF4444' },
 };
 
-function PublishBadge({ state }) {
-  const badge = PUBLISH_BADGES[state];
+// A partial publish gets its own badge, naming the platform that never got the
+// post. A flat green PUBLISHED for a post one platform never received is the
+// single most misleading thing this card can say.
+function PublishBadge({ state, missed }) {
+  const dropped = (missed || []).filter(Boolean);
+  const badge = dropped.length && (state === 'published' || state === 'scheduled')
+    ? { label: `⚠ NOT ON ${dropped.join(' / ')}`, color: '#FFC107' }
+    : PUBLISH_BADGES[state];
   if (!badge) return null;
   return (
     <span style={{
@@ -152,7 +158,7 @@ function LibraryCard({ item, onDelete, onEdit, loading, onLoadMedia, onPublished
             {filename}
           </div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-            <PublishBadge state={item.publishState} />
+            <PublishBadge state={item.publishState} missed={item.publishMissedPlatforms} />
             {content && (
               <span style={{
                 background: `${pillarColor}22`,

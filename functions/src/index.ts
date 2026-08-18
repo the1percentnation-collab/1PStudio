@@ -302,18 +302,28 @@ interface ZernioAccount {
 // until the function's 540s hard kill — which skips the catch and leaves the
 // job stuck on "publishing" (the app shows "POSTING…") forever. Bounding each
 // call turns a hang into a clean, caught error the job records as "failed".
-const ZERNIO_TIMEOUT_MS = 120000; // 120s — generous; /posts normally replies in seconds
+// A single call must also never outlive the FUNCTION invocation that made it.
+// A function killed at its own timeout returns no response whatsoever — not a
+// 500, nothing — so Hosting drops the connection and the browser reports a bare
+// network failure with no status to show ("Load failed" in Safari). Each
+// budget below leaves room for the sequential calls its caller makes:
+//   reads    — /profiles + /accounts (or /posts), 2 x 12s inside a 30s function
+//   publish  — /profiles + /accounts + POST /posts, 3 x 30s inside 120s (the
+//              endpoint) or the worker's 500s deadline
+const ZERNIO_READ_TIMEOUT_MS = 12000;
+const ZERNIO_PUBLISH_TIMEOUT_MS = 30000;
 
 async function zernioFetch(
   path: string,
   apiKey: string,
   init?: RequestInit,
+  timeoutMs: number = ZERNIO_PUBLISH_TIMEOUT_MS,
 ): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
   let r: Response;
   try {
     r = await fetch(`${ZERNIO_API}${path}`, {
       ...init,
-      signal: init?.signal ?? AbortSignal.timeout(ZERNIO_TIMEOUT_MS),
+      signal: init?.signal ?? AbortSignal.timeout(timeoutMs),
       headers: {
         "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
@@ -324,7 +334,7 @@ async function zernioFetch(
     const name = (e as { name?: string })?.name;
     if (name === "TimeoutError" || name === "AbortError") {
       throw new JobError(504,
-        `Zernio didn't respond within ${ZERNIO_TIMEOUT_MS / 1000}s (${path}). It may be busy — try posting again.`);
+        `Zernio didn't respond within ${Math.round(timeoutMs / 1000)}s (${path}). It may be busy — try again.`);
     }
     throw new JobError(502,
       `Couldn't reach Zernio (${path}): ${(e as Error)?.message || "network error"}`);
@@ -370,10 +380,14 @@ function zernioError(data: Record<string, unknown>): string | null {
 // Which Zernio profile to operate on. Pinned via the caller's profile id
 // (Settings / ZERNIO_PROFILE_ID), else the first profile on the account.
 // Returns null if the key has no profiles.
-async function resolveProfileId(apiKey: string, pinnedProfileId?: string): Promise<string | null> {
+async function resolveProfileId(
+  apiKey: string,
+  pinnedProfileId?: string,
+  timeoutMs: number = ZERNIO_PUBLISH_TIMEOUT_MS,
+): Promise<string | null> {
   const pinned = (pinnedProfileId ?? "").trim();
   if (pinned) return pinned;
-  const {ok, data} = await zernioFetch("/profiles", apiKey);
+  const {ok, data} = await zernioFetch("/profiles", apiKey, undefined, timeoutMs);
   if (!ok) return null;
   const first = asArray(data, "profiles", "data", "items")[0];
   const id = first?.id ?? first?.profileId ?? first?._id;
@@ -384,10 +398,13 @@ async function resolveProfileId(apiKey: string, pinnedProfileId?: string): Promi
 async function listZernioAccounts(
   apiKey: string,
   profileId: string,
+  timeoutMs: number = ZERNIO_PUBLISH_TIMEOUT_MS,
 ): Promise<ZernioAccount[]> {
   const {ok, data} = await zernioFetch(
     `/accounts?profileId=${encodeURIComponent(profileId)}`,
     apiKey,
+    undefined,
+    timeoutMs,
   );
   if (!ok) return [];
   return asArray(data, "accounts", "data", "items")
@@ -410,10 +427,87 @@ async function listZernioAccounts(
     .filter((a): a is ZernioAccount => a !== null);
 }
 
+// What actually happened to each platform in a publish. A 2xx from Zernio only
+// means the REQUEST was accepted — individual platforms can still be rejected
+// in the same response body (a revoked token, a video the platform refuses),
+// which is how a post used to read as "published" while a platform never
+// received it.
+interface PlatformOutcome {
+  published: string[];  // the platform confirmed it
+  pending: string[];    // accepted, still processing — outcome not yet known
+  failed: { platform: string; message: string }[];
+}
+
+const OK_STATES = ["success", "succeeded", "posted", "sent", "published", "completed", "live", "ok"];
+const FAIL_STATES = ["error", "failed", "failure", "rejected", "cancelled", "canceled"];
+
+// A per-platform row's error, from the explicit error keys only. `message` is
+// deliberately not consulted here — platforms use it for progress text too
+// ("queued", "uploading"), and reading that as a failure would invert the bug
+// this is fixing.
+function rowError(row: Record<string, unknown>): string | null {
+  const direct = row.error ?? row.errorMessage ?? row.failureReason ?? row.reason;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  if (direct && typeof direct === "object") {
+    const m = (direct as { message?: unknown }).message;
+    if (typeof m === "string" && m.trim()) return m.trim();
+  }
+  if (Array.isArray(row.errors)) {
+    const parts = row.errors
+      .map((e) => (typeof e === "string" ? e : String((e as { message?: unknown })?.message ?? "")))
+      .filter((x) => x.trim());
+    if (parts.length) return parts.join("; ");
+  }
+  return null;
+}
+
+// Reads per-platform results out of a publish response. Zernio's envelope is
+// not contractually stable, so every plausible key is probed and anything
+// unrecognized counts as PENDING, never as published — the whole point is to
+// stop claiming success we can't actually see.
+function readPlatformOutcomes(data: Record<string, unknown>, targets: ZernioAccount[]): PlatformOutcome {
+  const rows = [
+    ...asArray(data, "posts", "results", "platforms", "targets", "accounts"),
+    ...asArray((data as { data?: unknown }).data, "posts", "results", "platforms", "targets", "accounts"),
+  ];
+  const rowFor = (platform: string) => rows.find((r) => {
+    const raw = String(r.platform ?? r.provider ?? r.network ?? "").toLowerCase();
+    return (FROM_ZERNIO[raw] ?? raw) === platform;
+  });
+
+  const out: PlatformOutcome = { published: [], pending: [], failed: [] };
+  for (const t of targets) {
+    const row = rowFor(t.platform);
+    if (!row) {
+      // No per-platform row at all: the response says nothing about this
+      // platform, so the honest answer is "not confirmed yet".
+      out.pending.push(t.platform);
+      continue;
+    }
+    const state = String(row.status ?? row.state ?? row.result ?? "").toLowerCase();
+    const err = rowError(row);
+    if (FAIL_STATES.includes(state) || (err && !OK_STATES.includes(state))) {
+      out.failed.push({ platform: t.platform, message: err || `${t.platform} rejected the post.` });
+    } else if (OK_STATES.includes(state)) {
+      out.published.push(t.platform);
+    } else {
+      out.pending.push(t.platform);
+    }
+  }
+  return out;
+}
+
 // The Zernio publish itself, shared by the publishPost endpoint (legacy
 // clients) and the background publish worker. Throws JobError on anything
 // that should stop the publish.
-async function performZernioPublish(input: PublishBody): Promise<{ mediaUrl: string; skipped: string[]; ayrshare: unknown }> {
+async function performZernioPublish(input: PublishBody): Promise<{
+  mediaUrl: string;
+  skipped: string[];
+  publishedPlatforms: string[];
+  pendingPlatforms: string[];
+  failedPlatforms: { platform: string; message: string }[];
+  ayrshare: unknown;
+}> {
   const apiKey = (input.apiKey ?? "").trim() || (process.env.ZERNIO_API_KEY ?? "");
   if (!apiKey) throw new JobError(400, "No Zernio API key — add yours in Settings to post.");
 
@@ -490,9 +584,23 @@ async function performZernioPublish(input: PublishBody): Promise<{ mediaUrl: str
       throw new JobError(status, zernioError(data) || `Zernio error ${status}`);
     }
 
+    const outcome = readPlatformOutcomes(data, targets);
+    // Every single target rejected: that is a failed publish, not a published
+    // one, no matter that the HTTP call itself succeeded.
+    if (outcome.failed.length === targets.length && targets.length > 0) {
+      throw new JobError(502, outcome.failed.map((f) => `${f.platform}: ${f.message}`).join("; "));
+    }
+
     // `ayrshare` key kept for client/reconciler back-compat; it carries the
     // provider's post id (postId) used to match against post history later.
-    return { mediaUrl, skipped, ayrshare: data };
+    return {
+      mediaUrl,
+      skipped,
+      publishedPlatforms: outcome.published,
+      pendingPlatforms: outcome.pending,
+      failedPlatforms: outcome.failed,
+      ayrshare: data,
+    };
   } catch (e) {
     if (e instanceof JobError) throw e;
     throw new JobError(502, `Failed to reach Zernio: ${e instanceof Error ? e.message : "unknown error"}`);
@@ -536,21 +644,24 @@ export const accountsStatus = onRequest(
     memory: "256MiB",
   },
   async (req, res) => {
-    const keys = await resolveUserKeys(req);
-    const apiKey = keys.zernio;
-    if (!apiKey) {
-      res.status(200).json({ configured: false, connected: [], displayNames: [] });
-      return;
-    }
-
+    // Everything is inside the try: a throw that escapes the handler kills the
+    // invocation without ever sending a response, and the browser sees that as
+    // a bare network error rather than a message it can show.
     try {
-      const profileId = await resolveProfileId(apiKey, keys.zernioProfile);
+      const keys = await resolveUserKeys(req);
+      const apiKey = keys.zernio;
+      if (!apiKey) {
+        res.status(200).json({ configured: false, connected: [], displayNames: [] });
+        return;
+      }
+
+      const profileId = await resolveProfileId(apiKey, keys.zernioProfile, ZERNIO_READ_TIMEOUT_MS);
       if (!profileId) {
         res.status(200).json({ configured: true, connected: [], displayNames: [], error: "No Zernio profile found for this API key." });
         return;
       }
 
-      const accounts = await listZernioAccounts(apiKey, profileId);
+      const accounts = await listZernioAccounts(apiKey, profileId, ZERNIO_READ_TIMEOUT_MS);
       const connected = Array.from(
         new Set(accounts.filter((a) => a.connected).map((a) => a.platform))
       );
@@ -622,17 +733,18 @@ export const postHistory = onRequest(
     memory: "256MiB",
   },
   async (req, res) => {
-    const keys = await resolveUserKeys(req);
-    const apiKey = keys.zernio;
-    if (!apiKey) {
-      res.status(200).json({ configured: false, posts: [] });
-      return;
-    }
-
+    // See accountsStatus: an escaping throw sends no response at all.
     try {
-      const profileId = await resolveProfileId(apiKey, keys.zernioProfile);
+      const keys = await resolveUserKeys(req);
+      const apiKey = keys.zernio;
+      if (!apiKey) {
+        res.status(200).json({ configured: false, posts: [] });
+        return;
+      }
+
+      const profileId = await resolveProfileId(apiKey, keys.zernioProfile, ZERNIO_READ_TIMEOUT_MS);
       const path = profileId ? `/posts?profileId=${encodeURIComponent(profileId)}` : "/posts";
-      const { ok, status, data } = await zernioFetch(path, apiKey);
+      const { ok, status, data } = await zernioFetch(path, apiKey, undefined, ZERNIO_READ_TIMEOUT_MS);
 
       if (!ok) {
         res.status(200).json({ configured: true, posts: [], error: `Zernio error ${status}` });
@@ -706,6 +818,35 @@ const ffprobePath: string = require("@ffprobe-installer/ffprobe").path;
 // runtime (compiled output), so the fonts dir is one level up.
 const fontsDir = path.join(__dirname, "..", "fonts");
 const ASS_FONT = "Liberation Sans";
+
+// Editor font families, shipped as .ttf in functions/fonts. A burn has to use
+// the SAME family the canvas preview drew with, or a post comes back in a font
+// the user never picked. `bold` records whether the family has a real bold
+// face — telling libass to bold one that doesn't (Bebas Neue, Anton, Archivo
+// Black…) yields a smeared synthetic bold instead of the preview's look.
+// Keep in sync with the <link> in public/index.html and ensureFontsLoaded()
+// in src/services/overlayRenderer.js.
+const BUNDLED_FONTS: Record<string, { family: string; bold: boolean }> = {
+  "bebas neue": { family: "Bebas Neue", bold: false },
+  "dm sans": { family: "DM Sans", bold: true },
+  "anton": { family: "Anton", bold: false },
+  "archivo black": { family: "Archivo Black", bold: false },
+  "pacifico": { family: "Pacifico", bold: false },
+  "courier prime": { family: "Courier Prime", bold: true },
+  "caveat": { family: "Caveat", bold: false },
+  // Liberation Sans is metric-compatible with Arial/Helvetica.
+  "arial": { family: ASS_FONT, bold: true },
+  "helvetica": { family: ASS_FONT, bold: true },
+  "sans-serif": { family: ASS_FONT, bold: true },
+};
+
+// Spec font name + numeric weight -> a bundled family and an ASS bold flag.
+// Unknown families fall back to Liberation Sans rather than to whatever
+// fontconfig happens to find in the runtime image.
+function resolveFont(name?: string, weight?: number): { family: string; bold: 0 | 1 } {
+  const hit = BUNDLED_FONTS[String(name ?? "").trim().toLowerCase()] ?? { family: ASS_FONT, bold: true };
+  return { family: hit.family, bold: hit.bold && (weight ?? 400) >= 600 ? 1 : 0 };
+}
 
 interface DGWord {
   word: string;
@@ -931,13 +1072,17 @@ export const captionVideo = onRequest(
 
 interface SpecText {
   text?: string; x?: number; y?: number; size?: number;
-  color?: string; weight?: number;
+  color?: string; font?: string; weight?: number; maxWidth?: number;
   outline?: { color?: string; width?: number } | null;
+  bg?: string | null; bgOpacity?: number;
+  shadow?: { color?: string; blur?: number; dx?: number; dy?: number } | null;
   start?: number; end?: number | null;
 }
-interface SpecCaptionLine { text?: string; start?: number; end?: number }
+interface SpecCaptionWord { w?: string; s?: number; e?: number }
+interface SpecCaptionLine { text?: string; start?: number; end?: number; words?: SpecCaptionWord[] }
 interface SpecCaptions {
   enabled?: boolean; size?: number; y?: number; lines?: SpecCaptionLine[];
+  preset?: string; font?: string; weight?: number;
 }
 interface OverlaySpec {
   texts?: SpecText[];
@@ -973,11 +1118,37 @@ function atempoChain(speed: number): string[] {
   return stages;
 }
 
+// Any CSS colour the editor can produce (#RGB, #RRGGBB, #RRGGBBAA, rgb(),
+// rgba()) -> ASS &HAABBGGRR. AA is ASS *transparency*, so 00 is fully opaque;
+// `opacity` (0..1) multiplies whatever alpha the colour itself carries.
+// Falls back to opaque white.
+function assColorAlpha(color?: string | null, opacity = 1): string {
+  let r = 255; let g = 255; let b = 255; let a = 1;
+  const raw = String(color ?? "").trim();
+  const rgb = /^rgba?\(([^)]+)\)$/i.exec(raw);
+  if (rgb) {
+    const parts = rgb[1].split(",").map((s) => Number(s.trim()));
+    r = parts[0]; g = parts[1]; b = parts[2];
+    if (parts.length > 3 && Number.isFinite(parts[3])) a = parts[3];
+  } else {
+    let h = raw.replace("#", "");
+    if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+    if (h.length === 6 || h.length === 8) {
+      r = parseInt(h.slice(0, 2), 16);
+      g = parseInt(h.slice(2, 4), 16);
+      b = parseInt(h.slice(4, 6), 16);
+      if (h.length === 8) a = parseInt(h.slice(6, 8), 16) / 255;
+    }
+  }
+  const byte = (n: number) => Math.max(0, Math.min(255, Math.round(Number.isFinite(n) ? n : 0)));
+  const hex2 = (n: number) => byte(n).toString(16).padStart(2, "0");
+  const alpha = 255 - 255 * Math.max(0, Math.min(1, (Number.isFinite(a) ? a : 1) * opacity));
+  return `&H${hex2(alpha)}${hex2(b)}${hex2(g)}${hex2(r)}`.toUpperCase();
+}
+
 // #RRGGBB -> ASS &H00BBGGRR (opaque). Falls back to white.
 function assColor(hex?: string): string {
-  const h = (hex ?? "").replace("#", "");
-  if (h.length < 6) return "&H00FFFFFF";
-  return `&H00${h.slice(4, 6)}${h.slice(2, 4)}${h.slice(0, 2)}`.toUpperCase();
+  return assColorAlpha(hex, 1);
 }
 
 function assEsc(s: string): string {
@@ -1002,6 +1173,32 @@ function wrapAss(text: string, maxChars: number): string {
   return assEsc(lines.join("\n"));
 }
 
+// Brand red, used for the karaoke caption highlight. Mirrors BRAND_RED in
+// src/services/overlayRenderer.js.
+const BRAND_RED = "#E63329";
+
+interface AssStyle {
+  font: string;
+  size: number;
+  bold: 0 | 1;
+  primary: string;
+  outlineColour: string;
+  back: string;
+  borderStyle: 1 | 3;
+  outline: number;
+  shadow: number;
+}
+
+// Every burned element gets its own style line: font family, colours, box vs.
+// outline and border widths are style-level in ASS (there is no inline
+// override for BorderStyle or Fontname), so a shared style would flatten every
+// element onto one look — which is exactly how a hand-picked font/colour used
+// to get lost between the editor preview and the posted video.
+function assStyleLine(name: string, s: AssStyle): string {
+  return `Style: ${name},${s.font},${s.size},${s.primary},${s.primary},${s.outlineColour},${s.back},` +
+    `${s.bold},0,0,0,100,100,0,0,${s.borderStyle},${s.outline},${s.shadow},5,40,40,40,1`;
+}
+
 // Returns the ASS document plus how many burn events it produced (0 = nothing
 // to render, caller can skip ffmpeg and post the original).
 function buildOverlayAss(
@@ -1009,45 +1206,132 @@ function buildOverlayAss(
   timeScale = 1
 ): { ass: string; count: number } {
   const events: string[] = [];
+  const styles: string[] = [];
 
-  for (const el of spec.texts ?? []) {
-    if (!el.text || !el.text.trim()) continue;
+  // Wrap to ~maxWidth of the frame. 0.62·fontsize approximates the average
+  // glyph advance for bold ALL-CAPS hooks (lowercase averages ~0.52); with
+  // WrapStyle 0, libass re-wraps with real glyph metrics if a line is still
+  // too wide for the frame.
+  const wrapChars = (fs: number, maxWidth: number) =>
+    Math.max(6, Math.floor((maxWidth * width) / (fs * 0.62)));
+
+  (spec.texts ?? []).forEach((el, i) => {
+    if (!el.text || !el.text.trim()) return;
     const start = Math.max(0, ((el.start ?? 0) - clipStart) / timeScale);
     const end = Math.max(start, ((el.end == null ? duration : el.end) - clipStart) / timeScale);
     const fs = Math.max(8, Math.round((el.size ?? 0.05) * height));
     const cx = Math.round((el.x ?? 0.5) * width);
     const cy = Math.round((el.y ?? 0.5) * height);
-    const bord = el.outline === null ? 0 : Math.max(1, Math.round((el.outline?.width ?? 0.12) * fs));
-    const bold = (el.weight ?? 400) >= 600 ? 1 : 0;
-    const tags = `\\an5\\pos(${cx},${cy})\\fs${fs}\\c${assColor(el.color ?? "#FFFFFF")}` +
-      `\\3c${assColor(el.outline?.color ?? "#000000")}\\bord${bord}\\shad0\\b${bold}`;
-    // Wrap to ~90% of frame width. 0.62·fontsize approximates the average
-    // glyph advance for bold ALL-CAPS hooks (lowercase averages ~0.52); with
-    // WrapStyle 0, libass re-wraps with real glyph metrics if a line is still
-    // too wide for the frame.
-    const maxChars = Math.max(6, Math.floor((0.9 * width) / (fs * 0.62)));
-    events.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Txt,,0,0,0,,{${tags}}${wrapAss(el.text, maxChars)}`);
-  }
+    const { family, bold } = resolveFont(el.font, el.weight);
+    const hasBg = typeof el.bg === "string" && el.bg.trim() !== "";
+    // BorderStyle 3 paints an opaque plate in OutlineColour — the ASS
+    // equivalent of the preview's rounded background box, with the border
+    // width acting as padding (the canvas pads 0.32em/0.14em). ASS can't draw
+    // a plate AND a stroke, so the plate wins; that reads the same, since the
+    // preview's plate covers most of the stroke anyway.
+    const bord = hasBg
+      ? Math.max(1, Math.round(fs * 0.22))
+      : el.outline === null ? 0 : Math.max(1, Math.round((el.outline?.width ?? 0.12) * fs));
+    const shadow = el.shadow ? Math.max(1, Math.round(fs * (el.shadow.dy ?? 0.06))) : 0;
+
+    const styleName = `Txt${i}`;
+    styles.push(assStyleLine(styleName, {
+      font: family,
+      size: fs,
+      bold,
+      primary: assColorAlpha(el.color ?? "#FFFFFF"),
+      outlineColour: hasBg
+        ? assColorAlpha(el.bg, el.bgOpacity ?? 0.8)
+        : assColorAlpha(el.outline?.color ?? "#000000"),
+      back: assColorAlpha(el.shadow?.color ?? "#000000"),
+      borderStyle: hasBg ? 3 : 1,
+      outline: bord,
+      shadow,
+    }));
+
+    const maxChars = wrapChars(fs, el.maxWidth ?? 0.9);
+    events.push(
+      `Dialogue: 0,${assTime(start)},${assTime(end)},${styleName},,0,0,0,,` +
+      `{\\an5\\pos(${cx},${cy})}${wrapAss(el.text, maxChars)}`
+    );
+  });
 
   const caps = spec.captions;
   if (caps?.enabled && Array.isArray(caps.lines)) {
     const fs = Math.max(8, Math.round((caps.size ?? 0.042) * height));
     const cx = Math.round(width / 2);
     const cy = Math.round((caps.y ?? 0.72) * height);
-    const bord = Math.max(2, Math.round(fs * 0.16));
+    const preset = caps.preset === "block" || caps.preset === "karaoke" ? caps.preset : "outline";
+    const { family, bold } = resolveFont(caps.font ?? "DM Sans", caps.weight ?? 800);
+    const isBlock = preset === "block";
+    // Outline widths mirror drawCaption() in src/services/overlayRenderer.js.
+    styles.push(assStyleLine("Cap", {
+      font: family,
+      size: fs,
+      bold,
+      primary: assColorAlpha("#FFFFFF"),
+      // 'block' draws the same 85%-black plate the canvas fills behind the line.
+      outlineColour: isBlock ? assColorAlpha("#000000", 0.85) : assColorAlpha("#000000"),
+      back: assColorAlpha("#000000"),
+      borderStyle: isBlock ? 3 : 1,
+      outline: isBlock
+        ? Math.max(1, Math.round(fs * 0.28))
+        : Math.max(2, Math.round(fs * (preset === "karaoke" ? 0.18 : 0.2))),
+      shadow: 0,
+    }));
+
+    const maxChars = wrapChars(fs, 0.9);
+    const pos = `{\\an5\\pos(${cx},${cy})}`;
+    const redTag = `{\\c${assColorAlpha(BRAND_RED)}&}`;
+    const whiteTag = `{\\c${assColorAlpha("#FFFFFF")}&}`;
+
     for (const line of caps.lines) {
       const text = String(line.text ?? "").toUpperCase();
       if (!text.trim()) continue;
-      const start = Math.max(0, ((line.start ?? 0) - clipStart) / timeScale);
-      const end = Math.max(start, ((line.end ?? start) - clipStart) / timeScale);
-      const tags = `\\an5\\pos(${cx},${cy})\\fs${fs}\\c&H00FFFFFF&\\3c&H00000000&\\bord${bord}\\shad0\\b1`;
-      const maxChars = Math.max(6, Math.floor((0.9 * width) / (fs * 0.62)));
-      events.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Cap,,0,0,0,,{${tags}}${wrapAss(text, maxChars)}`);
+      const lineStart = Math.max(0, ((line.start ?? 0) - clipStart) / timeScale);
+      const lineEnd = Math.max(lineStart, ((line.end ?? line.start ?? 0) - clipStart) / timeScale);
+      const words = Array.isArray(line.words) ? line.words : [];
+
+      if (preset === "karaoke" && words.length) {
+        // One event per word window, the active word in brand red — the same
+        // thing getActiveCaption() does frame-by-frame in the preview, and
+        // more predictable across renderers than \k karaoke timing.
+        const upper = words.map((w) => String(w?.w ?? "").toUpperCase());
+        const wordStart = (j: number) =>
+          Math.max(lineStart, Math.min(lineEnd, ((words[j]?.s ?? 0) - clipStart) / timeScale));
+        const paint = (active: number) =>
+          upper
+            .map((w, j) => (j === active ? `${redTag}${assEsc(w)}${whiteTag}` : assEsc(w)))
+            .join(" ");
+        const windows: { s: number; e: number; active: number }[] = [];
+        if (wordStart(0) > lineStart + 0.01) windows.push({ s: lineStart, e: wordStart(0), active: -1 });
+        for (let j = 0; j < words.length; j++) {
+          const s = wordStart(j);
+          const e = j + 1 < words.length ? Math.max(s, wordStart(j + 1)) : lineEnd;
+          if (e > s + 0.01) windows.push({ s, e, active: j });
+        }
+        for (const w of windows) {
+          events.push(`Dialogue: 0,${assTime(w.s)},${assTime(w.e)},Cap,,0,0,0,,${pos}${paint(w.active)}`);
+        }
+        continue;
+      }
+
+      events.push(`Dialogue: 0,${assTime(lineStart)},${assTime(lineEnd)},Cap,,0,0,0,,${pos}${wrapAss(text, maxChars)}`);
     }
   }
 
-  const styleLine = (name: string) =>
-    `Style: ${name},${ASS_FONT},48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,3,0,5,40,40,40,1`;
+  // libass refuses a style-less script; a placeholder keeps a zero-event
+  // document parseable (the caller skips ffmpeg entirely in that case).
+  if (styles.length === 0) {
+    styles.push(assStyleLine("Txt0", {
+      font: ASS_FONT, size: 48, bold: 1,
+      primary: assColorAlpha("#FFFFFF"),
+      outlineColour: assColorAlpha("#000000"),
+      back: assColorAlpha("#000000"),
+      borderStyle: 1, outline: 3, shadow: 0,
+    }));
+  }
+
   const ass = `[Script Info]
 ScriptType: v4.00+
 PlayResX: ${width}
@@ -1057,8 +1341,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-${styleLine("Txt")}
-${styleLine("Cap")}
+${styles.join("\n")}
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -1400,10 +1683,21 @@ export const publishJobWorker = onDocumentCreated(
       // write would mislabel a completed publish as failed).
       const az = out.ayrshare as { id?: unknown; postId?: unknown; posts?: { id?: unknown }[] } | null;
       const ayrshareId = az?.id ?? az?.postId ?? az?.posts?.[0]?.id ?? null;
+      // A publish is only "published" if nothing was dropped. A platform that
+      // was skipped (not connected in Zernio) or rejected still leaves the
+      // other platforms live, so the job stays terminal — but it is recorded
+      // as partial so the app can say which platform never got the post,
+      // instead of showing a flat green PUBLISHED for all of them.
+      const skipped = out.skipped ?? [];
+      const failed = out.failedPlatforms ?? [];
       await patch({
         status: job.scheduleDate ? "scheduled" : "published",
         ayrshareId: ayrshareId != null ? String(ayrshareId) : null,
-        skippedPlatforms: out.skipped ?? [],
+        skippedPlatforms: skipped,
+        publishedPlatforms: out.publishedPlatforms ?? [],
+        pendingPlatforms: out.pendingPlatforms ?? [],
+        failedPlatforms: failed.map((f) => `${f.platform}: ${f.message}`),
+        partial: skipped.length > 0 || failed.length > 0,
         completedAt: FieldValue.serverTimestamp(),
       });
         })(),

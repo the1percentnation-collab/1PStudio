@@ -70,23 +70,34 @@ export async function uploadVideo(videoFile, onProgress) {
   throw lastErr || new Error('Upload failed — please try again.');
 }
 
-// Fetches normalized post history from Zernio via the postHistory function.
-// Returns { configured, posts: [{id, status, caption, platforms, mediaUrls, date, errors}], error? }
-export async function getPostHistory() {
-  const response = await fetch('/api/history', { headers: await authHeaders() });
+// A fetch() that rejects outright produced messages like Safari's bare "Load
+// failed", which says nothing about what broke. The usual cause is the Cloud
+// Function being killed at its own timeout before it answers: no status, no
+// body, just a dropped connection. Name that, so the message is actionable.
+async function apiFetch(path, label) {
+  let response;
+  try {
+    response = await fetch(path, { headers: await authHeaders() });
+  } catch (e) {
+    throw new Error(
+      `Couldn't reach the server (${label}). It may have timed out or you may be offline — tap Retry.`
+    );
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data?.error || `Failed to load history (${response.status})`);
+    throw new Error(data?.error || `Failed to load ${label} (${response.status})`);
   }
   return data;
 }
 
+// Fetches normalized post history from Zernio via the postHistory function.
+// Returns { configured, posts: [{id, status, caption, platforms, mediaUrls, date, errors}], error? }
+export async function getPostHistory() {
+  return apiFetch('/api/history', 'history');
+}
+
 // Fetches which social accounts are connected in Zernio.
+// Returns { configured, connected: [ids], displayNames: [{platform, displayName}], error? }
 export async function getConnectedAccounts() {
-  const response = await fetch('/api/accounts', { headers: await authHeaders() });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data?.error || `Failed to load accounts (${response.status})`);
-  }
-  return data; // { configured, connected: [ids], displayNames: [{platform, displayName}], error? }
+  return apiFetch('/api/accounts', 'accounts');
 }

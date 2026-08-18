@@ -249,13 +249,18 @@ export default function App() {
     }
     const s = patch.publishState;
     if (s === 'publishing') return;
+    const missed = patch.publishMissedPlatforms || [];
     const messages = {
       published: { kind: 'ok', message: '✓ Video posted — upload completed.' },
       scheduled: { kind: 'ok', message: '✓ Post scheduled.' },
       pending: { kind: 'warn', message: '⏳ Post sent — open the Posts tab to confirm it went live.' },
       failed: { kind: 'error', message: '✕ Posting failed — open the item to see why and retry.' },
     };
-    const t = messages[s];
+    // A publish that dropped a platform is not a success story — name the
+    // platform that never got the post rather than showing a green tick.
+    const t = missed.length && (s === 'published' || s === 'scheduled')
+      ? { kind: 'warn', message: `⚠ Posted, but ${missed.join(' and ')} did not get it — check that account is connected.` }
+      : messages[s];
     if (!t) return;
     if (s === 'failed') {
       reportError(new Error(patch.publishError || 'Publish failed'), { kind: 'publish-job' });
@@ -301,17 +306,31 @@ export default function App() {
             thumbnail: item.frames?.hookFrame || null,
             date: job.scheduleDate || new Date().toISOString(),
             status: job.status,
-            errors: [],
+            errors: job.failedPlatforms || [],
           });
         }
+        // Platforms Zernio never posted to: skipped (account not connected)
+        // plus rejected. `failedPlatforms` entries are "platform: reason".
+        const failedNames = (job.failedPlatforms || []).map((f) => String(f).split(':')[0].trim());
+        const missed = Array.from(new Set([...(job.skippedPlatforms || []), ...failedNames])).filter(Boolean);
         notify('1P Studio', job.status === 'failed'
           ? `Posting "${item.filename}" failed: ${(job.error || '').slice(0, 120)}`
-          : job.status === 'scheduled' ? `"${item.filename}" is scheduled.` : `"${item.filename}" was posted — upload completed.`);
+          : missed.length
+            ? `"${item.filename}" posted, but not to ${missed.join(' and ')}.`
+            : job.status === 'scheduled' ? `"${item.filename}" is scheduled.` : `"${item.filename}" was posted — upload completed.`);
         handlePublishState(item.id, {
           publishState: job.status,
           publishedAt: Date.now(),
-          publishedPlatforms: meta.platforms || [],
-          publishError: job.error || null,
+          // What actually went out. Falling back to the requested list is what
+          // used to make a skipped platform look like a successful one.
+          publishedPlatforms: (job.publishedPlatforms || []).length
+            ? job.publishedPlatforms
+            : (job.pendingPlatforms || []).length || missed.length
+              ? job.pendingPlatforms || []
+              : meta.platforms || [],
+          publishMissedPlatforms: missed,
+          publishPartial: Boolean(job.partial) || missed.length > 0,
+          publishError: job.error || (job.failedPlatforms || []).join('; ') || null,
         });
       });
       jobSubsRef.current.set(jobId, unsub);

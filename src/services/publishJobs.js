@@ -53,7 +53,9 @@ export async function startPublishJob(mediaFile, { post, title, platforms, sched
 }
 
 // Live-watches a job. onChange receives { status, error, ayrshareId,
-// scheduleDate } on every server update. Returns the unsubscribe function.
+// scheduleDate, publishedPlatforms, pendingPlatforms, skippedPlatforms,
+// failedPlatforms, partial } on every server update. Returns the unsubscribe
+// function.
 export function watchPublishJob(jobId, onChange) {
   return onSnapshot(
     doc(db, 'publishJobs', jobId),
@@ -65,6 +67,14 @@ export function watchPublishJob(jobId, onChange) {
         error: d.error || null,
         ayrshareId: d.ayrshareId ?? null,
         scheduleDate: d.scheduleDate || null,
+        // What actually went out, as opposed to what was requested. A publish
+        // can end terminal-and-successful while one platform was skipped (not
+        // connected) or rejected — these carry that so the badge can say so.
+        publishedPlatforms: d.publishedPlatforms || [],
+        pendingPlatforms: d.pendingPlatforms || [],
+        skippedPlatforms: d.skippedPlatforms || [],
+        failedPlatforms: d.failedPlatforms || [],
+        partial: Boolean(d.partial),
       });
     },
     () => {
