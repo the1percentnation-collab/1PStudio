@@ -707,6 +707,35 @@ const ffprobePath: string = require("@ffprobe-installer/ffprobe").path;
 const fontsDir = path.join(__dirname, "..", "fonts");
 const ASS_FONT = "Liberation Sans";
 
+// Editor font families, shipped as .ttf in functions/fonts. A burn has to use
+// the SAME family the canvas preview drew with, or a post comes back in a font
+// the user never picked. `bold` records whether the family has a real bold
+// face — telling libass to bold one that doesn't (Bebas Neue, Anton, Archivo
+// Black…) yields a smeared synthetic bold instead of the preview's look.
+// Keep in sync with the <link> in public/index.html and ensureFontsLoaded()
+// in src/services/overlayRenderer.js.
+const BUNDLED_FONTS: Record<string, { family: string; bold: boolean }> = {
+  "bebas neue": { family: "Bebas Neue", bold: false },
+  "dm sans": { family: "DM Sans", bold: true },
+  "anton": { family: "Anton", bold: false },
+  "archivo black": { family: "Archivo Black", bold: false },
+  "pacifico": { family: "Pacifico", bold: false },
+  "courier prime": { family: "Courier Prime", bold: true },
+  "caveat": { family: "Caveat", bold: false },
+  // Liberation Sans is metric-compatible with Arial/Helvetica.
+  "arial": { family: ASS_FONT, bold: true },
+  "helvetica": { family: ASS_FONT, bold: true },
+  "sans-serif": { family: ASS_FONT, bold: true },
+};
+
+// Spec font name + numeric weight -> a bundled family and an ASS bold flag.
+// Unknown families fall back to Liberation Sans rather than to whatever
+// fontconfig happens to find in the runtime image.
+function resolveFont(name?: string, weight?: number): { family: string; bold: 0 | 1 } {
+  const hit = BUNDLED_FONTS[String(name ?? "").trim().toLowerCase()] ?? { family: ASS_FONT, bold: true };
+  return { family: hit.family, bold: hit.bold && (weight ?? 400) >= 600 ? 1 : 0 };
+}
+
 interface DGWord {
   word: string;
   start: number;
@@ -931,13 +960,17 @@ export const captionVideo = onRequest(
 
 interface SpecText {
   text?: string; x?: number; y?: number; size?: number;
-  color?: string; weight?: number;
+  color?: string; font?: string; weight?: number; maxWidth?: number;
   outline?: { color?: string; width?: number } | null;
+  bg?: string | null; bgOpacity?: number;
+  shadow?: { color?: string; blur?: number; dx?: number; dy?: number } | null;
   start?: number; end?: number | null;
 }
-interface SpecCaptionLine { text?: string; start?: number; end?: number }
+interface SpecCaptionWord { w?: string; s?: number; e?: number }
+interface SpecCaptionLine { text?: string; start?: number; end?: number; words?: SpecCaptionWord[] }
 interface SpecCaptions {
   enabled?: boolean; size?: number; y?: number; lines?: SpecCaptionLine[];
+  preset?: string; font?: string; weight?: number;
 }
 interface OverlaySpec {
   texts?: SpecText[];
@@ -973,11 +1006,37 @@ function atempoChain(speed: number): string[] {
   return stages;
 }
 
+// Any CSS colour the editor can produce (#RGB, #RRGGBB, #RRGGBBAA, rgb(),
+// rgba()) -> ASS &HAABBGGRR. AA is ASS *transparency*, so 00 is fully opaque;
+// `opacity` (0..1) multiplies whatever alpha the colour itself carries.
+// Falls back to opaque white.
+function assColorAlpha(color?: string | null, opacity = 1): string {
+  let r = 255; let g = 255; let b = 255; let a = 1;
+  const raw = String(color ?? "").trim();
+  const rgb = /^rgba?\(([^)]+)\)$/i.exec(raw);
+  if (rgb) {
+    const parts = rgb[1].split(",").map((s) => Number(s.trim()));
+    r = parts[0]; g = parts[1]; b = parts[2];
+    if (parts.length > 3 && Number.isFinite(parts[3])) a = parts[3];
+  } else {
+    let h = raw.replace("#", "");
+    if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+    if (h.length === 6 || h.length === 8) {
+      r = parseInt(h.slice(0, 2), 16);
+      g = parseInt(h.slice(2, 4), 16);
+      b = parseInt(h.slice(4, 6), 16);
+      if (h.length === 8) a = parseInt(h.slice(6, 8), 16) / 255;
+    }
+  }
+  const byte = (n: number) => Math.max(0, Math.min(255, Math.round(Number.isFinite(n) ? n : 0)));
+  const hex2 = (n: number) => byte(n).toString(16).padStart(2, "0");
+  const alpha = 255 - 255 * Math.max(0, Math.min(1, (Number.isFinite(a) ? a : 1) * opacity));
+  return `&H${hex2(alpha)}${hex2(b)}${hex2(g)}${hex2(r)}`.toUpperCase();
+}
+
 // #RRGGBB -> ASS &H00BBGGRR (opaque). Falls back to white.
 function assColor(hex?: string): string {
-  const h = (hex ?? "").replace("#", "");
-  if (h.length < 6) return "&H00FFFFFF";
-  return `&H00${h.slice(4, 6)}${h.slice(2, 4)}${h.slice(0, 2)}`.toUpperCase();
+  return assColorAlpha(hex, 1);
 }
 
 function assEsc(s: string): string {
@@ -1002,6 +1061,32 @@ function wrapAss(text: string, maxChars: number): string {
   return assEsc(lines.join("\n"));
 }
 
+// Brand red, used for the karaoke caption highlight. Mirrors BRAND_RED in
+// src/services/overlayRenderer.js.
+const BRAND_RED = "#E63329";
+
+interface AssStyle {
+  font: string;
+  size: number;
+  bold: 0 | 1;
+  primary: string;
+  outlineColour: string;
+  back: string;
+  borderStyle: 1 | 3;
+  outline: number;
+  shadow: number;
+}
+
+// Every burned element gets its own style line: font family, colours, box vs.
+// outline and border widths are style-level in ASS (there is no inline
+// override for BorderStyle or Fontname), so a shared style would flatten every
+// element onto one look — which is exactly how a hand-picked font/colour used
+// to get lost between the editor preview and the posted video.
+function assStyleLine(name: string, s: AssStyle): string {
+  return `Style: ${name},${s.font},${s.size},${s.primary},${s.primary},${s.outlineColour},${s.back},` +
+    `${s.bold},0,0,0,100,100,0,0,${s.borderStyle},${s.outline},${s.shadow},5,40,40,40,1`;
+}
+
 // Returns the ASS document plus how many burn events it produced (0 = nothing
 // to render, caller can skip ffmpeg and post the original).
 function buildOverlayAss(
@@ -1009,45 +1094,132 @@ function buildOverlayAss(
   timeScale = 1
 ): { ass: string; count: number } {
   const events: string[] = [];
+  const styles: string[] = [];
 
-  for (const el of spec.texts ?? []) {
-    if (!el.text || !el.text.trim()) continue;
+  // Wrap to ~maxWidth of the frame. 0.62·fontsize approximates the average
+  // glyph advance for bold ALL-CAPS hooks (lowercase averages ~0.52); with
+  // WrapStyle 0, libass re-wraps with real glyph metrics if a line is still
+  // too wide for the frame.
+  const wrapChars = (fs: number, maxWidth: number) =>
+    Math.max(6, Math.floor((maxWidth * width) / (fs * 0.62)));
+
+  (spec.texts ?? []).forEach((el, i) => {
+    if (!el.text || !el.text.trim()) return;
     const start = Math.max(0, ((el.start ?? 0) - clipStart) / timeScale);
     const end = Math.max(start, ((el.end == null ? duration : el.end) - clipStart) / timeScale);
     const fs = Math.max(8, Math.round((el.size ?? 0.05) * height));
     const cx = Math.round((el.x ?? 0.5) * width);
     const cy = Math.round((el.y ?? 0.5) * height);
-    const bord = el.outline === null ? 0 : Math.max(1, Math.round((el.outline?.width ?? 0.12) * fs));
-    const bold = (el.weight ?? 400) >= 600 ? 1 : 0;
-    const tags = `\\an5\\pos(${cx},${cy})\\fs${fs}\\c${assColor(el.color ?? "#FFFFFF")}` +
-      `\\3c${assColor(el.outline?.color ?? "#000000")}\\bord${bord}\\shad0\\b${bold}`;
-    // Wrap to ~90% of frame width. 0.62·fontsize approximates the average
-    // glyph advance for bold ALL-CAPS hooks (lowercase averages ~0.52); with
-    // WrapStyle 0, libass re-wraps with real glyph metrics if a line is still
-    // too wide for the frame.
-    const maxChars = Math.max(6, Math.floor((0.9 * width) / (fs * 0.62)));
-    events.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Txt,,0,0,0,,{${tags}}${wrapAss(el.text, maxChars)}`);
-  }
+    const { family, bold } = resolveFont(el.font, el.weight);
+    const hasBg = typeof el.bg === "string" && el.bg.trim() !== "";
+    // BorderStyle 3 paints an opaque plate in OutlineColour — the ASS
+    // equivalent of the preview's rounded background box, with the border
+    // width acting as padding (the canvas pads 0.32em/0.14em). ASS can't draw
+    // a plate AND a stroke, so the plate wins; that reads the same, since the
+    // preview's plate covers most of the stroke anyway.
+    const bord = hasBg
+      ? Math.max(1, Math.round(fs * 0.22))
+      : el.outline === null ? 0 : Math.max(1, Math.round((el.outline?.width ?? 0.12) * fs));
+    const shadow = el.shadow ? Math.max(1, Math.round(fs * (el.shadow.dy ?? 0.06))) : 0;
+
+    const styleName = `Txt${i}`;
+    styles.push(assStyleLine(styleName, {
+      font: family,
+      size: fs,
+      bold,
+      primary: assColorAlpha(el.color ?? "#FFFFFF"),
+      outlineColour: hasBg
+        ? assColorAlpha(el.bg, el.bgOpacity ?? 0.8)
+        : assColorAlpha(el.outline?.color ?? "#000000"),
+      back: assColorAlpha(el.shadow?.color ?? "#000000"),
+      borderStyle: hasBg ? 3 : 1,
+      outline: bord,
+      shadow,
+    }));
+
+    const maxChars = wrapChars(fs, el.maxWidth ?? 0.9);
+    events.push(
+      `Dialogue: 0,${assTime(start)},${assTime(end)},${styleName},,0,0,0,,` +
+      `{\\an5\\pos(${cx},${cy})}${wrapAss(el.text, maxChars)}`
+    );
+  });
 
   const caps = spec.captions;
   if (caps?.enabled && Array.isArray(caps.lines)) {
     const fs = Math.max(8, Math.round((caps.size ?? 0.042) * height));
     const cx = Math.round(width / 2);
     const cy = Math.round((caps.y ?? 0.72) * height);
-    const bord = Math.max(2, Math.round(fs * 0.16));
+    const preset = caps.preset === "block" || caps.preset === "karaoke" ? caps.preset : "outline";
+    const { family, bold } = resolveFont(caps.font ?? "DM Sans", caps.weight ?? 800);
+    const isBlock = preset === "block";
+    // Outline widths mirror drawCaption() in src/services/overlayRenderer.js.
+    styles.push(assStyleLine("Cap", {
+      font: family,
+      size: fs,
+      bold,
+      primary: assColorAlpha("#FFFFFF"),
+      // 'block' draws the same 85%-black plate the canvas fills behind the line.
+      outlineColour: isBlock ? assColorAlpha("#000000", 0.85) : assColorAlpha("#000000"),
+      back: assColorAlpha("#000000"),
+      borderStyle: isBlock ? 3 : 1,
+      outline: isBlock
+        ? Math.max(1, Math.round(fs * 0.28))
+        : Math.max(2, Math.round(fs * (preset === "karaoke" ? 0.18 : 0.2))),
+      shadow: 0,
+    }));
+
+    const maxChars = wrapChars(fs, 0.9);
+    const pos = `{\\an5\\pos(${cx},${cy})}`;
+    const redTag = `{\\c${assColorAlpha(BRAND_RED)}&}`;
+    const whiteTag = `{\\c${assColorAlpha("#FFFFFF")}&}`;
+
     for (const line of caps.lines) {
       const text = String(line.text ?? "").toUpperCase();
       if (!text.trim()) continue;
-      const start = Math.max(0, ((line.start ?? 0) - clipStart) / timeScale);
-      const end = Math.max(start, ((line.end ?? start) - clipStart) / timeScale);
-      const tags = `\\an5\\pos(${cx},${cy})\\fs${fs}\\c&H00FFFFFF&\\3c&H00000000&\\bord${bord}\\shad0\\b1`;
-      const maxChars = Math.max(6, Math.floor((0.9 * width) / (fs * 0.62)));
-      events.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Cap,,0,0,0,,{${tags}}${wrapAss(text, maxChars)}`);
+      const lineStart = Math.max(0, ((line.start ?? 0) - clipStart) / timeScale);
+      const lineEnd = Math.max(lineStart, ((line.end ?? line.start ?? 0) - clipStart) / timeScale);
+      const words = Array.isArray(line.words) ? line.words : [];
+
+      if (preset === "karaoke" && words.length) {
+        // One event per word window, the active word in brand red — the same
+        // thing getActiveCaption() does frame-by-frame in the preview, and
+        // more predictable across renderers than \k karaoke timing.
+        const upper = words.map((w) => String(w?.w ?? "").toUpperCase());
+        const wordStart = (j: number) =>
+          Math.max(lineStart, Math.min(lineEnd, ((words[j]?.s ?? 0) - clipStart) / timeScale));
+        const paint = (active: number) =>
+          upper
+            .map((w, j) => (j === active ? `${redTag}${assEsc(w)}${whiteTag}` : assEsc(w)))
+            .join(" ");
+        const windows: { s: number; e: number; active: number }[] = [];
+        if (wordStart(0) > lineStart + 0.01) windows.push({ s: lineStart, e: wordStart(0), active: -1 });
+        for (let j = 0; j < words.length; j++) {
+          const s = wordStart(j);
+          const e = j + 1 < words.length ? Math.max(s, wordStart(j + 1)) : lineEnd;
+          if (e > s + 0.01) windows.push({ s, e, active: j });
+        }
+        for (const w of windows) {
+          events.push(`Dialogue: 0,${assTime(w.s)},${assTime(w.e)},Cap,,0,0,0,,${pos}${paint(w.active)}`);
+        }
+        continue;
+      }
+
+      events.push(`Dialogue: 0,${assTime(lineStart)},${assTime(lineEnd)},Cap,,0,0,0,,${pos}${wrapAss(text, maxChars)}`);
     }
   }
 
-  const styleLine = (name: string) =>
-    `Style: ${name},${ASS_FONT},48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,3,0,5,40,40,40,1`;
+  // libass refuses a style-less script; a placeholder keeps a zero-event
+  // document parseable (the caller skips ffmpeg entirely in that case).
+  if (styles.length === 0) {
+    styles.push(assStyleLine("Txt0", {
+      font: ASS_FONT, size: 48, bold: 1,
+      primary: assColorAlpha("#FFFFFF"),
+      outlineColour: assColorAlpha("#000000"),
+      back: assColorAlpha("#000000"),
+      borderStyle: 1, outline: 3, shadow: 0,
+    }));
+  }
+
   const ass = `[Script Info]
 ScriptType: v4.00+
 PlayResX: ${width}
@@ -1057,8 +1229,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-${styleLine("Txt")}
-${styleLine("Cap")}
+${styles.join("\n")}
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
