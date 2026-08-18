@@ -410,10 +410,87 @@ async function listZernioAccounts(
     .filter((a): a is ZernioAccount => a !== null);
 }
 
+// What actually happened to each platform in a publish. A 2xx from Zernio only
+// means the REQUEST was accepted — individual platforms can still be rejected
+// in the same response body (a revoked token, a video the platform refuses),
+// which is how a post used to read as "published" while a platform never
+// received it.
+interface PlatformOutcome {
+  published: string[];  // the platform confirmed it
+  pending: string[];    // accepted, still processing — outcome not yet known
+  failed: { platform: string; message: string }[];
+}
+
+const OK_STATES = ["success", "succeeded", "posted", "sent", "published", "completed", "live", "ok"];
+const FAIL_STATES = ["error", "failed", "failure", "rejected", "cancelled", "canceled"];
+
+// A per-platform row's error, from the explicit error keys only. `message` is
+// deliberately not consulted here — platforms use it for progress text too
+// ("queued", "uploading"), and reading that as a failure would invert the bug
+// this is fixing.
+function rowError(row: Record<string, unknown>): string | null {
+  const direct = row.error ?? row.errorMessage ?? row.failureReason ?? row.reason;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  if (direct && typeof direct === "object") {
+    const m = (direct as { message?: unknown }).message;
+    if (typeof m === "string" && m.trim()) return m.trim();
+  }
+  if (Array.isArray(row.errors)) {
+    const parts = row.errors
+      .map((e) => (typeof e === "string" ? e : String((e as { message?: unknown })?.message ?? "")))
+      .filter((x) => x.trim());
+    if (parts.length) return parts.join("; ");
+  }
+  return null;
+}
+
+// Reads per-platform results out of a publish response. Zernio's envelope is
+// not contractually stable, so every plausible key is probed and anything
+// unrecognized counts as PENDING, never as published — the whole point is to
+// stop claiming success we can't actually see.
+function readPlatformOutcomes(data: Record<string, unknown>, targets: ZernioAccount[]): PlatformOutcome {
+  const rows = [
+    ...asArray(data, "posts", "results", "platforms", "targets", "accounts"),
+    ...asArray((data as { data?: unknown }).data, "posts", "results", "platforms", "targets", "accounts"),
+  ];
+  const rowFor = (platform: string) => rows.find((r) => {
+    const raw = String(r.platform ?? r.provider ?? r.network ?? "").toLowerCase();
+    return (FROM_ZERNIO[raw] ?? raw) === platform;
+  });
+
+  const out: PlatformOutcome = { published: [], pending: [], failed: [] };
+  for (const t of targets) {
+    const row = rowFor(t.platform);
+    if (!row) {
+      // No per-platform row at all: the response says nothing about this
+      // platform, so the honest answer is "not confirmed yet".
+      out.pending.push(t.platform);
+      continue;
+    }
+    const state = String(row.status ?? row.state ?? row.result ?? "").toLowerCase();
+    const err = rowError(row);
+    if (FAIL_STATES.includes(state) || (err && !OK_STATES.includes(state))) {
+      out.failed.push({ platform: t.platform, message: err || `${t.platform} rejected the post.` });
+    } else if (OK_STATES.includes(state)) {
+      out.published.push(t.platform);
+    } else {
+      out.pending.push(t.platform);
+    }
+  }
+  return out;
+}
+
 // The Zernio publish itself, shared by the publishPost endpoint (legacy
 // clients) and the background publish worker. Throws JobError on anything
 // that should stop the publish.
-async function performZernioPublish(input: PublishBody): Promise<{ mediaUrl: string; skipped: string[]; ayrshare: unknown }> {
+async function performZernioPublish(input: PublishBody): Promise<{
+  mediaUrl: string;
+  skipped: string[];
+  publishedPlatforms: string[];
+  pendingPlatforms: string[];
+  failedPlatforms: { platform: string; message: string }[];
+  ayrshare: unknown;
+}> {
   const apiKey = (input.apiKey ?? "").trim() || (process.env.ZERNIO_API_KEY ?? "");
   if (!apiKey) throw new JobError(400, "No Zernio API key — add yours in Settings to post.");
 
@@ -490,9 +567,23 @@ async function performZernioPublish(input: PublishBody): Promise<{ mediaUrl: str
       throw new JobError(status, zernioError(data) || `Zernio error ${status}`);
     }
 
+    const outcome = readPlatformOutcomes(data, targets);
+    // Every single target rejected: that is a failed publish, not a published
+    // one, no matter that the HTTP call itself succeeded.
+    if (outcome.failed.length === targets.length && targets.length > 0) {
+      throw new JobError(502, outcome.failed.map((f) => `${f.platform}: ${f.message}`).join("; "));
+    }
+
     // `ayrshare` key kept for client/reconciler back-compat; it carries the
     // provider's post id (postId) used to match against post history later.
-    return { mediaUrl, skipped, ayrshare: data };
+    return {
+      mediaUrl,
+      skipped,
+      publishedPlatforms: outcome.published,
+      pendingPlatforms: outcome.pending,
+      failedPlatforms: outcome.failed,
+      ayrshare: data,
+    };
   } catch (e) {
     if (e instanceof JobError) throw e;
     throw new JobError(502, `Failed to reach Zernio: ${e instanceof Error ? e.message : "unknown error"}`);
@@ -1571,10 +1662,21 @@ export const publishJobWorker = onDocumentCreated(
       // write would mislabel a completed publish as failed).
       const az = out.ayrshare as { id?: unknown; postId?: unknown; posts?: { id?: unknown }[] } | null;
       const ayrshareId = az?.id ?? az?.postId ?? az?.posts?.[0]?.id ?? null;
+      // A publish is only "published" if nothing was dropped. A platform that
+      // was skipped (not connected in Zernio) or rejected still leaves the
+      // other platforms live, so the job stays terminal — but it is recorded
+      // as partial so the app can say which platform never got the post,
+      // instead of showing a flat green PUBLISHED for all of them.
+      const skipped = out.skipped ?? [];
+      const failed = out.failedPlatforms ?? [];
       await patch({
         status: job.scheduleDate ? "scheduled" : "published",
         ayrshareId: ayrshareId != null ? String(ayrshareId) : null,
-        skippedPlatforms: out.skipped ?? [],
+        skippedPlatforms: skipped,
+        publishedPlatforms: out.publishedPlatforms ?? [],
+        pendingPlatforms: out.pendingPlatforms ?? [],
+        failedPlatforms: failed.map((f) => `${f.platform}: ${f.message}`),
+        partial: skipped.length > 0 || failed.length > 0,
         completedAt: FieldValue.serverTimestamp(),
       });
         })(),

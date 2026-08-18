@@ -140,7 +140,7 @@ export default function PostsView({ posts, onNavigate, onRefresh, syncState = {}
                   {(p.platforms || []).map((id) => PLATFORM_LABELS[id] || id).join(' · ') || '—'}
                   {p.source === 'ayrshare' && <span style={{ color: '#444', marginLeft: 8 }}>synced</span>}
                 </div>
-                {p.status === 'failed' && (p.errors || []).length > 0 && (
+                {(p.errors || []).length > 0 && (
                   <div style={{ fontSize: 11, color: '#FF6B6B', marginTop: 5, lineHeight: 1.45, wordBreak: 'break-word' }}>
                     {p.errors.join('; ')}
                   </div>
