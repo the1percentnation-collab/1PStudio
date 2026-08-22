@@ -2,6 +2,22 @@
 
 TikTok content generator for The One Percent Nation brand, powered by Claude AI.
 
+## Live URLs
+
+- **https://the1pnation.com/studio** — branded entry point. The main site
+  (deployed from the `the1pnation-site` repo, Firebase project
+  `the-1p-leadership`) 301-redirects `/studio` and any deeper path to the app.
+- **https://onepstudio-9a3ef.web.app** — the app itself, on Firebase Hosting in
+  the `onepstudio-9a3ef` project.
+
+The app and the main site live in different Firebase projects, and Firebase
+Hosting attaches custom domains at the domain level — a path on another
+project's domain can't serve this app directly (the `/api/*` function rewrites
+only work on this project's own hosting). Hence the redirect. To upgrade to a
+fully branded address, connect `studio.the1pnation.com` as a custom domain to
+this project (Firebase console → Hosting → Add custom domain, then add the DNS
+records it shows), and point the main site's `/studio` redirect there.
+
 ## Setup
 
 ### 1. Install dependencies
