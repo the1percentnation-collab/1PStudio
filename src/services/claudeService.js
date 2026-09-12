@@ -156,6 +156,39 @@ export async function extractFramesFromVideo(videoFile) {
 
 const MAX_IMAGE_DIM = 1280;
 
+// Long-edge cap for frames SENT TO CLAUDE. The API bills image input by pixel
+// area (~1 token per 750 px²), so a 1280-long-edge frame costs ~4x the tokens
+// of a 640 one with no gain in caption quality. Full-res frames stay local for
+// thumbnails/posters — only the copies in the analyze request are shrunk.
+const MAX_ANALYSIS_DIM = 640;
+
+function shrinkForAnalysis(base64) {
+  if (!base64) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const w = img.naturalWidth || img.width;
+        const h = img.naturalHeight || img.height;
+        const scale = Math.min(1, MAX_ANALYSIS_DIM / Math.max(w, h));
+        if (scale >= 1) {
+          resolve(base64);
+          return;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(w * scale);
+        canvas.height = Math.round(h * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.75).split(',')[1]);
+      } catch {
+        resolve(base64); // shrinking is an optimization — never block analysis
+      }
+    };
+    img.onerror = () => resolve(base64);
+    img.src = `data:image/jpeg;base64,${base64}`;
+  });
+}
+
 // Decode an image file, draw it to a canvas (capped to MAX_IMAGE_DIM on the
 // long edge), and return a base64 JPEG. Mirrors the canvas -> JPEG approach in
 // extractFrameAt so the output matches the backend's image/jpeg media_type.
@@ -235,7 +268,12 @@ export async function generateTikTokContent(file, onProgress, transcript = '') {
 
   // Network-level failures (iOS Safari's bare "Load failed") get retried —
   // a single dropped connection shouldn't kill the whole generation.
-  const body = JSON.stringify({ frames, transcript: finalTranscript, filename: file.name, mediaType });
+  const analysisFrames = {
+    hookFrame: await shrinkForAnalysis(frames.hookFrame),
+    midFrame: await shrinkForAnalysis(frames.midFrame),
+    endFrame: await shrinkForAnalysis(frames.endFrame),
+  };
+  const body = JSON.stringify({ frames: analysisFrames, transcript: finalTranscript, filename: file.name, mediaType });
   const headers = { 'Content-Type': 'application/json', ...(await authHeaders()) };
   let response = null;
   let netErr = null;

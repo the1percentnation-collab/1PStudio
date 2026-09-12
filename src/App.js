@@ -445,6 +445,14 @@ export default function App() {
     [results, processFile]
   );
 
+  // Content generated manually through the Claude app (subscription flow) —
+  // replaces the card's content exactly like a successful /api/analyze would,
+  // and persists to the library entry so it survives a reload.
+  const handleApplyManualContent = useCallback((id, content) => {
+    setResults((prev) => prev.map((r) => (r.id === id ? { ...r, content, error: null } : r)));
+    setLibrary((prev) => prev.map((i) => (i.id === id ? { ...i, content, error: null } : i)));
+  }, []);
+
   const [editingId, setEditingId] = useState(null);
   const editingResult = results.find((r) => r.id === editingId) || null;
   const [showTextCreator, setShowTextCreator] = useState(false);
@@ -568,6 +576,7 @@ export default function App() {
                 onPublished={handlePublished}
                 onPublishState={handlePublishState}
                 onEdit={handleEdit}
+                onApplyContent={handleApplyManualContent}
               />
             ))}
           </div>

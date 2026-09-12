@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import PublishPanel from './PublishPanel';
+import { buildManualPrompt, parseManualContent } from '../services/manualClaude';
 
 const PILLAR_COLORS = {
   'Self-Sabotage & Limiting Beliefs': '#E63329',
@@ -330,7 +331,152 @@ function TranscriptPanel({ onRegenerate, isRegenerating, initialTranscript, isPh
   );
 }
 
-export default function VideoCard({ result, onRegenerate, onRemove, onPublished, onPublishState, onEdit }) {
+// Zero-API-cost generation: copy the strategist prompt into the Claude app
+// (covered by a claude.ai subscription), paste the JSON reply back, done.
+function ClaudeAppPanel({ result, onApplyContent }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [pasted, setPasted] = useState('');
+  const [parseError, setParseError] = useState('');
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        style={{
+          background: 'transparent',
+          border: '1px dashed #333',
+          color: '#666',
+          fontSize: 12,
+          padding: '7px 14px',
+          borderRadius: 8,
+          cursor: 'pointer',
+          transition: 'color 0.2s, border-color 0.2s',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = '#AAA'; e.currentTarget.style.borderColor = '#555'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = '#666'; e.currentTarget.style.borderColor = '#333'; }}
+      >
+        ⚡ Free with Claude app
+      </button>
+    );
+  }
+
+  const handleCopy = () => {
+    const prompt = buildManualPrompt({
+      transcript: result.transcript,
+      filename: result.filename,
+      mediaType: result.mediaType,
+    });
+    navigator.clipboard.writeText(prompt).then(
+      () => { setCopied(true); setTimeout(() => setCopied(false), 2500); },
+      () => {}
+    );
+  };
+
+  const handleApply = () => {
+    try {
+      onApplyContent(result.id, parseManualContent(pasted));
+      setOpen(false);
+      setPasted('');
+      setParseError('');
+    } catch (err) {
+      setParseError(err.message);
+    }
+  };
+
+  const stepBtn = {
+    background: '#1A1A1A',
+    color: '#CCC',
+    fontSize: 13,
+    fontWeight: 600,
+    padding: '7px 14px',
+    borderRadius: 8,
+    border: '1px solid #333',
+    cursor: 'pointer',
+  };
+
+  return (
+    <div style={{ width: '100%', marginTop: 4, background: '#0A0A0A', border: '1px solid #2A2A2A', borderRadius: 8, padding: 12 }}>
+      <div style={{ fontSize: 12, color: '#888', lineHeight: 1.5, marginBottom: 10 }}>
+        Generate with your <span style={{ color: '#CCC', fontWeight: 600 }}>Claude subscription</span> instead
+        of API credits: copy the prompt, paste it into the Claude app, then paste Claude&rsquo;s reply back here.
+        {!result.transcript?.trim() && (
+          <span style={{ color: '#B8860B' }}> Tip: add a transcript first for much better results.</span>
+        )}
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+        <button onClick={handleCopy} style={stepBtn}>
+          {copied ? '✓ Copied!' : '1. Copy Prompt'}
+        </button>
+        <a
+          href="https://claude.ai/new"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ ...stepBtn, textDecoration: 'none', display: 'inline-block' }}
+        >
+          2. Open Claude ↗
+        </a>
+      </div>
+      <textarea
+        placeholder="3. Paste Claude’s reply here (the JSON)…"
+        value={pasted}
+        onChange={(e) => { setPasted(e.target.value); setParseError(''); }}
+        rows={4}
+        style={{
+          width: '100%',
+          background: '#111',
+          border: '1px solid #2A2A2A',
+          borderRadius: 8,
+          color: '#CCC',
+          fontSize: 12,
+          lineHeight: 1.5,
+          padding: '10px 12px',
+          resize: 'vertical',
+          boxSizing: 'border-box',
+          fontFamily: 'inherit',
+          marginBottom: 8,
+        }}
+      />
+      {parseError && (
+        <div style={{ fontSize: 12, color: '#FF4444', marginBottom: 8 }}>{parseError}</div>
+      )}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button
+          onClick={handleApply}
+          disabled={!pasted.trim()}
+          style={{
+            background: '#E63329',
+            color: '#FFF',
+            fontSize: 13,
+            fontWeight: 600,
+            padding: '7px 16px',
+            borderRadius: 8,
+            cursor: !pasted.trim() ? 'not-allowed' : 'pointer',
+            opacity: !pasted.trim() ? 0.5 : 1,
+          }}
+        >
+          Apply
+        </button>
+        <button
+          onClick={() => { setOpen(false); setPasted(''); setParseError(''); }}
+          style={{
+            background: 'transparent',
+            border: '1px solid #333',
+            color: '#666',
+            fontSize: 13,
+            padding: '7px 12px',
+            borderRadius: 8,
+            cursor: 'pointer',
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function VideoCard({ result, onRegenerate, onRemove, onPublished, onPublishState, onEdit, onApplyContent }) {
   const { id, filename, frames, content, error, _file, videoUrl, transcript, mediaType } = result;
   const isPhoto = mediaType === 'photo';
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -562,6 +708,10 @@ export default function VideoCard({ result, onRegenerate, onRemove, onPublished,
         </button>
 
         <TranscriptPanel onRegenerate={handleRegenerate} isRegenerating={isRegenerating} initialTranscript={transcript} isPhoto={isPhoto} />
+
+        {onApplyContent && (
+          <ClaudeAppPanel result={result} onApplyContent={onApplyContent} />
+        )}
 
         <button
           onClick={() => onRemove(id)}

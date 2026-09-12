@@ -100,6 +100,12 @@ async function requireAdmin(req: Request): Promise<void> {
   }
 }
 
+// Model for all caption/clip generation. Haiku 4.5 runs at $1/$5 per million
+// input/output tokens vs $3/$15 for the Sonnet tier — a ~3x cost cut — and is
+// plenty for these structured-JSON copywriting tasks. Override per deploy with
+// ANTHROPIC_MODEL (e.g. "claude-sonnet-4-6") if output quality ever needs it.
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5";
+
 function buildSystemPrompt(isPhoto: boolean): string {
   const media = isPhoto ? "TikTok photo post" : "TikTok video";
   const sourceLine = isPhoto
@@ -190,7 +196,7 @@ export const analyzeVideo = onRequest(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-6",
+        model: ANTHROPIC_MODEL,
         max_tokens: 1800,
         system: buildSystemPrompt(isPhoto),
         messages: [{ role: "user", content: contentBlocks }],
@@ -2087,7 +2093,7 @@ export const selectClips = onRequest(
           "anthropic-version": "2023-06-01",
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-6",
+          model: ANTHROPIC_MODEL,
           max_tokens: 3000,
           system: CLIP_SYSTEM_PROMPT,
           messages: [{ role: "user", content: userText }],
